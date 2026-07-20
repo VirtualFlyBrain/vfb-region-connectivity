@@ -1,0 +1,10 @@
+# VIOLATION: an edge whose source (the neuron) is not a VFB individual IRI.
+# Every region-connectivity edge should originate from a VFB neuron individual.
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+
+SELECT DISTINCT ?neuron
+WHERE {
+  ?ax a owl:Axiom ;
+      owl:annotatedSource ?neuron .
+  FILTER(isIRI(?neuron) && !STRSTARTS(str(?neuron), "http://virtualflybrain.org/reports/VFB_"))
+}

@@ -1,0 +1,22 @@
+# VIOLATION: a synapse count annotation attached to an axiom whose relation is
+# not one of the two expected region-connectivity relations
+# (RO:0002110 has postsynaptic terminal in / RO:0002113 has presynaptic terminals in).
+#
+# Handles both emitted forms:
+#   * individual region -> ObjectPropertyAssertion: relation is annotatedProperty
+#   * FBbt-class region -> ClassAssertion(ObjectSomeValuesFrom(rel class) n):
+#       relation is the restriction's owl:onProperty (annotatedProperty is rdf:type)
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX obo: <http://purl.obolibrary.org/obo/>
+PREFIX custom: <http://n2o.neo/custom/>
+
+SELECT ?ax ?relation
+WHERE {
+  ?ax a owl:Axiom ;
+      ?countProp ?value ;
+      owl:annotatedProperty ?annotatedProperty .
+  VALUES ?countProp { custom:upstream custom:Tbars custom:downstream }
+  OPTIONAL { ?ax owl:annotatedTarget/owl:onProperty ?onProperty . }
+  BIND(COALESCE(?onProperty, ?annotatedProperty) AS ?relation)
+  FILTER(?relation != obo:RO_0002110 && ?relation != obo:RO_0002113)
+}

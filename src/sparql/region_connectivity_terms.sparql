@@ -1,0 +1,19 @@
+# Entities participating in region-connectivity edges: neurons (edge sources),
+# region individuals (edge targets) and region classes (targets via
+# someValuesFrom, for datasets whose regions map to FBbt classes).
+# Sorted output is diffed between versions to detect added/removed neurons/regions.
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+
+SELECT DISTINCT ?term
+WHERE {
+  ?ax a owl:Axiom .
+  {
+    ?ax owl:annotatedSource ?term .
+  } UNION {
+    ?ax owl:annotatedTarget ?term .
+  } UNION {
+    ?ax owl:annotatedTarget/owl:someValuesFrom ?term .
+  }
+  FILTER(isIRI(?term))
+}
+ORDER BY ?term

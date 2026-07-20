@@ -1,0 +1,12 @@
+# VIOLATION: a synapse count annotation that is not a positive number.
+# Counts (upstream / Tbars / downstream) should always be > 0 where present.
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX custom: <http://n2o.neo/custom/>
+
+SELECT ?ax ?prop ?value
+WHERE {
+  VALUES ?prop { custom:upstream custom:Tbars custom:downstream }
+  ?ax a owl:Axiom ;
+      ?prop ?value .
+  FILTER(!(?value > 0))
+}

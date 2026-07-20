@@ -1,0 +1,23 @@
+id: VFB_region_connectivity
+title: "VFB Region Connectivity"
+description: Region (neuropil) synaptic connectivity of connectomics datasets, as side-loaded OWL for Virtual Fly Brain.
+github_org: VirtualFlyBrain
+repo: vfb-region-connectivity
+report_fail_on: None
+run_as_root: TRUE
+robot_report:
+  custom_profile: TRUE
+namespaces:
+  - http://virtualflybrain.org/reports/VFB_
+primary_release: full
+gzip_main: TRUE
+manage_import_declarations: false
+export_formats:
+  - owl
+edit_format: owl
+robot_java_args: '-Xmx8G'
+allow_equivalents: none
+release_date: TRUE
+create_obo_metadata: FALSE
+ci:
+  - github_actions

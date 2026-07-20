@@ -1,0 +1,17 @@
+# VIOLATION: a 'has postsynaptic terminal in' (RO:0002110) edge with no
+# 'upstream' count annotation. Every postsynaptic edge must carry a count.
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX obo: <http://purl.obolibrary.org/obo/>
+PREFIX custom: <http://n2o.neo/custom/>
+
+SELECT ?neuron ?region
+WHERE {
+  ?neuron obo:RO_0002110 ?region .
+  FILTER NOT EXISTS {
+    ?ax a owl:Axiom ;
+        owl:annotatedSource ?neuron ;
+        owl:annotatedProperty obo:RO_0002110 ;
+        owl:annotatedTarget ?region ;
+        custom:upstream ?upstream .
+  }
+}

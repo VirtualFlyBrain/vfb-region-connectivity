@@ -1,0 +1,17 @@
+# VIOLATION: a 'has presynaptic terminals in' (RO:0002113) edge with no
+# 'Tbars' count annotation. Every presynaptic edge must carry a T-bar count.
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX obo: <http://purl.obolibrary.org/obo/>
+PREFIX custom: <http://n2o.neo/custom/>
+
+SELECT ?neuron ?region
+WHERE {
+  ?neuron obo:RO_0002113 ?region .
+  FILTER NOT EXISTS {
+    ?ax a owl:Axiom ;
+        owl:annotatedSource ?neuron ;
+        owl:annotatedProperty obo:RO_0002113 ;
+        owl:annotatedTarget ?region ;
+        custom:Tbars ?tbars .
+  }
+}

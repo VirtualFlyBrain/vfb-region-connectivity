@@ -1,0 +1,90 @@
+# ODK-managed rules, do not modify
+# If you need to add your own ignore rules, you may do so below
+# the "End ODK-managed rules" marker at the end of this file.
+.DS_Store
+semantic.cache
+bin/
+
+*.tmp
+*.tmp.obo
+*.tmp.owl
+*.tmp.json
+*-relation-graph.tsv.gz
+.template.db
+
+.github/token.txt
+
+/VFB_region_connectivity.owl
+/VFB_region_connectivity.obo
+/VFB_region_connectivity.json
+/VFB_region_connectivity.db
+/VFB_region_connectivity-base.*
+/VFB_region_connectivity-basic.*
+/VFB_region_connectivity-full.*
+/VFB_region_connectivity-simple.*
+/VFB_region_connectivity-simple-non-classified.*
+/mappings/
+/patterns/
+/reports/
+/subsets/
+
+src/ontology/mirror
+src/ontology/mirror/*
+src/ontology/reports/*
+!src/ontology/reports/release-diff.md
+# track region-connectivity reports so versions can be diffed via git history
+# (merged term list at root; per-dataset terms + summary in reports/<dataset>/)
+!src/ontology/reports/region_connectivity-terms.txt
+!src/ontology/reports/*/
+src/ontology/reports/*/*
+!src/ontology/reports/*/terms.txt
+!src/ontology/reports/*/summary.tsv
+!src/ontology/reports/*/roi_mapping.tsv
+src/ontology/VFB_region_connectivity.owl
+src/ontology/VFB_region_connectivity.obo
+src/ontology/VFB_region_connectivity.json
+src/ontology/VFB_region_connectivity.db
+src/ontology/VFB_region_connectivity-base.*
+src/ontology/VFB_region_connectivity-basic.*
+src/ontology/VFB_region_connectivity-full.*
+src/ontology/VFB_region_connectivity-simple.*
+src/ontology/VFB_region_connectivity-simple-non-classified.*
+
+src/ontology/seed.txt
+src/ontology/dosdp-tools.log
+src/ontology/ed_definitions_merged.owl
+src/ontology/ontologyterms.txt
+src/ontology/simple_seed.txt
+src/ontology/patterns
+src/ontology/merged-VFB_region_connectivity-edit.owl
+src/ontology/VFB_region_connectivity-edit.properties
+
+src/ontology/target/
+src/ontology/tmp/*
+!src/ontology/tmp/.gitkeep
+!src/ontology/tmp/README.md
+
+src/ontology/run.sh.conf
+src/ontology/run.sh.env
+
+src/ontology/imports/*_terms_combined.txt
+
+src/patterns/data/**/*.ofn
+src/patterns/data/**/*.txt
+src/patterns/pattern_owl_seed.txt
+src/patterns/all_pattern_terms.txt
+
+# End of ODK-managed rules
+# region-connectivity repo specifics
+neuprint_token.txt
+np_token.txt
+src/ontology/my-venv/
+src/scripts/__pycache__/
+
+# large plain side-load artifacts (commit the .gz instead; >100MB blocked by GitHub)
+region_connectivity_*.owl
+!region_connectivity_*.owl.gz
+
+# unused ODK seed artifacts: this repo has no hand-edited ontology or minted IDs
+src/ontology/VFB_region_connectivity-edit.owl
+src/ontology/VFB_region_connectivity-idranges.owl

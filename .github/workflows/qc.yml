@@ -1,0 +1,51 @@
+name: QC
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  # Unit tests + an offline end-to-end pipeline test that runs the real
+  # transform on a SAVED neuprint/pdb sample (src/scripts/test_data/) and
+  # ROBOT-converts + shape-checks the result. No live neuprint/pdb queries.
+  tests:
+    runs-on: ubuntu-latest
+    container: obolibrary/odkfull:latest
+    env:
+      ROBOT_JAVA_ARGS: -Xmx4G
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python dependencies
+        run: pip install --break-system-packages -r src/scripts/requirements.txt pytest
+      - name: Run tests
+        run: cd src/scripts && python3 -m pytest -q
+
+  # Validate the shape of every committed side-load artifact (no neuprint needed):
+  # gunzip each region_connectivity_*.owl.gz and run the SPARQL shape checks via
+  # the Makefile's verify target (single source of truth for the query list).
+  validate-artifacts:
+    runs-on: ubuntu-latest
+    container: obolibrary/odkfull:latest
+    env:
+      ROBOT_JAVA_ARGS: -Xmx13G
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify side-load shape
+        run: |
+          shopt -s nullglob
+          # satisfy the order-only venv prereq so make never tries a neuprint pull
+          mkdir -p src/ontology/my-venv && touch src/ontology/my-venv/.installed
+          found=0
+          for gz in region_connectivity_*.owl.gz; do
+            ds=$(basename "$gz" .owl.gz); ds=${ds#region_connectivity_}
+            echo "== validating $ds =="
+            gunzip -kf "$gz"
+            ( cd src/ontology && make "reports/$ds/verify.txt" )
+            found=1
+          done
+          if [ "$found" = 0 ]; then
+            echo "No committed region_connectivity_*.owl.gz artifacts to validate."
+          fi

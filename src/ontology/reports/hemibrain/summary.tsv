@@ -1,0 +1,11 @@
+?metric	?value
+"dataset"	"hemibrain"
+"neuprint_source"	"hemibrain:v1.2.1"
+"neurons"	22642
+"postsynaptic_edges"	167323
+"presynaptic_edges"	133715
+"regions"	218
+"total_Tbars"	8443474
+"total_downstream"	53006780
+"total_upstream"	28557400
+"version"	"v1.2.1"
