@@ -1,0 +1,13 @@
+# VIOLATION: a count annotation in the n2o custom namespace that is not one of
+# the three expected totals (upstream / Tbars / downstream). Catches any stray
+# or re-introduced per-side bucket (e.g. upstream_left / Tbars_right).
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX custom: <http://n2o.neo/custom/>
+
+SELECT ?ax ?prop
+WHERE {
+  ?ax a owl:Axiom ;
+      ?prop ?value .
+  FILTER(STRSTARTS(STR(?prop), "http://n2o.neo/custom/"))
+  FILTER(?prop != custom:upstream && ?prop != custom:Tbars && ?prop != custom:downstream)
+}

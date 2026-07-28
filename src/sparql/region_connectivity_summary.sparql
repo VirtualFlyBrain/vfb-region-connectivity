@@ -19,17 +19,25 @@ WHERE {
     SELECT ("version" AS ?metric) (STR(?v) AS ?value)
     WHERE { ?ont a owl:Ontology ; owl:versionInfo ?v . }
   } UNION {
+    # every edge is a direct ObjectPropertyAssertion, reified as an owl:Axiom:
+    # relation = annotatedProperty, neuron = annotatedSource, region = annotatedTarget.
     SELECT ("neurons" AS ?metric) (COUNT(DISTINCT ?n) AS ?value)
-    WHERE { ?n obo:RO_0002110|obo:RO_0002113 ?r . }
+    WHERE {
+      ?ax a owl:Axiom ; owl:annotatedSource ?n ; owl:annotatedProperty ?rel .
+      FILTER(?rel = obo:RO_0002110 || ?rel = obo:RO_0002113)
+    }
   } UNION {
-    SELECT ("regions" AS ?metric) (COUNT(DISTINCT ?r) AS ?value)
-    WHERE { ?n obo:RO_0002110|obo:RO_0002113 ?r . FILTER(isIRI(?r)) }
+    SELECT ("regions" AS ?metric) (COUNT(DISTINCT ?reg) AS ?value)
+    WHERE {
+      ?ax a owl:Axiom ; owl:annotatedProperty ?rel ; owl:annotatedTarget ?reg .
+      FILTER((?rel = obo:RO_0002110 || ?rel = obo:RO_0002113) && isIRI(?reg))
+    }
   } UNION {
     SELECT ("postsynaptic_edges" AS ?metric) (COUNT(*) AS ?value)
-    WHERE { ?n obo:RO_0002110 ?r . }
+    WHERE { ?ax a owl:Axiom ; owl:annotatedProperty obo:RO_0002110 . }
   } UNION {
     SELECT ("presynaptic_edges" AS ?metric) (COUNT(*) AS ?value)
-    WHERE { ?n obo:RO_0002113 ?r . }
+    WHERE { ?ax a owl:Axiom ; owl:annotatedProperty obo:RO_0002113 . }
   } UNION {
     SELECT ("total_upstream" AS ?metric) (xsd:integer(SUM(?v)) AS ?value)
     WHERE { ?ax a owl:Axiom ; custom:upstream ?v . }

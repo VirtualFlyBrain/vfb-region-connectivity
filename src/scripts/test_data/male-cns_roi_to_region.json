@@ -1,0 +1,238 @@
+{
+  "AMMC(R)": [
+    "http://virtualflybrain.org/reports/VFB_001088hc",
+    "individual"
+  ],
+  "AOTU(R)": [
+    "http://virtualflybrain.org/reports/VFB_0010892f",
+    "individual"
+  ],
+  "CRE(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108c08",
+    "individual"
+  ],
+  "CV": [
+    "http://virtualflybrain.org/reports/VFB_00108c0b",
+    "individual"
+  ],
+  "CentralBrain": [
+    "http://virtualflybrain.org/reports/VFB_00108cg2",
+    "individual"
+  ],
+  "EPA(L)": [
+    "http://virtualflybrain.org/reports/VFB_00108d5e",
+    "individual"
+  ],
+  "EPA(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108dau",
+    "individual"
+  ],
+  "GNG": [
+    "http://virtualflybrain.org/reports/VFB_00108f4t",
+    "individual"
+  ],
+  "GOR(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108fag",
+    "individual"
+  ],
+  "IB": [
+    "http://virtualflybrain.org/reports/VFB_00108fm3",
+    "individual"
+  ],
+  "ICL(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108fp5",
+    "individual"
+  ],
+  "INP": [
+    "http://virtualflybrain.org/reports/VFB_00108fp8",
+    "individual"
+  ],
+  "IPS(L)": [
+    "http://virtualflybrain.org/reports/VFB_00108fq5",
+    "individual"
+  ],
+  "IPS(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108fuk",
+    "individual"
+  ],
+  "IntTct": [
+    "http://virtualflybrain.org/reports/VFB_00108fux",
+    "individual"
+  ],
+  "LAL(-GA)(L)": [
+    "http://virtualflybrain.org/reports/VFB_00108fyj",
+    "individual"
+  ],
+  "LAL(-GA)(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108g0d",
+    "individual"
+  ],
+  "LAL(L)": [
+    "http://virtualflybrain.org/reports/VFB_00108g3y",
+    "individual"
+  ],
+  "LAL(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108g41",
+    "individual"
+  ],
+  "LOP(L)": [
+    "http://virtualflybrain.org/reports/VFB_00108g4y",
+    "individual"
+  ],
+  "LOP_L_layer_1": [
+    "http://virtualflybrain.org/reports/VFB_00108ga3",
+    "individual"
+  ],
+  "LOP_L_layer_2": [
+    "http://virtualflybrain.org/reports/VFB_00108gae",
+    "individual"
+  ],
+  "LOP_L_layer_3": [
+    "http://virtualflybrain.org/reports/VFB_00108gai",
+    "individual"
+  ],
+  "LOP_L_layer_4": [
+    "http://virtualflybrain.org/reports/VFB_00108gal",
+    "individual"
+  ],
+  "LTct": [
+    "http://virtualflybrain.org/reports/VFB_00108hia",
+    "individual"
+  ],
+  "LX(L)": [
+    "http://virtualflybrain.org/reports/VFB_00108hiu",
+    "individual"
+  ],
+  "LX(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108hiv",
+    "individual"
+  ],
+  "MB(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108iqa",
+    "individual"
+  ],
+  "Optic(L)": [
+    "http://virtualflybrain.org/reports/VFB_00108mp1",
+    "individual"
+  ],
+  "PENP": [
+    "http://virtualflybrain.org/reports/VFB_00108p86",
+    "individual"
+  ],
+  "PLP(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108pe3",
+    "individual"
+  ],
+  "PVLP(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108pfk",
+    "individual"
+  ],
+  "SAD": [
+    "http://virtualflybrain.org/reports/VFB_00108qw6",
+    "individual"
+  ],
+  "SAD(-AMMC)": [
+    "http://virtualflybrain.org/reports/VFB_00108qxk",
+    "individual"
+  ],
+  "SCL(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108qyi",
+    "individual"
+  ],
+  "SIP(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108r44",
+    "individual"
+  ],
+  "SMP(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108rtx",
+    "individual"
+  ],
+  "SNP(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108rvm",
+    "individual"
+  ],
+  "SPS(L)": [
+    "http://virtualflybrain.org/reports/VFB_00108rx8",
+    "individual"
+  ],
+  "SPS(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108rxc",
+    "individual"
+  ],
+  "VES(L)": [
+    "http://virtualflybrain.org/reports/VFB_00108rxd",
+    "individual"
+  ],
+  "VES(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108ry7",
+    "individual"
+  ],
+  "VLNP(L)": [
+    "http://virtualflybrain.org/reports/VFB_00108rz6",
+    "individual"
+  ],
+  "VLNP(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108rzf",
+    "individual"
+  ],
+  "VMNP": [
+    "http://virtualflybrain.org/reports/VFB_00108rzg",
+    "individual"
+  ],
+  "VNC": [
+    "http://virtualflybrain.org/reports/VFB_00108s0b",
+    "individual"
+  ],
+  "WED(L)": [
+    "http://virtualflybrain.org/reports/VFB_00108s3x",
+    "individual"
+  ],
+  "WED(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108s4y",
+    "individual"
+  ],
+  "a'1(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108t1t",
+    "individual"
+  ],
+  "a'2(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108tit",
+    "individual"
+  ],
+  "a'L(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108tnx",
+    "individual"
+  ],
+  "a1(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108tp0",
+    "individual"
+  ],
+  "a2(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108tpj",
+    "individual"
+  ],
+  "aL(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108uag",
+    "individual"
+  ],
+  "b2(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108v35",
+    "individual"
+  ],
+  "bL(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108v5l",
+    "individual"
+  ],
+  "g2(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108vag",
+    "individual"
+  ],
+  "g3(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108vd3",
+    "individual"
+  ],
+  "gL(R)": [
+    "http://virtualflybrain.org/reports/VFB_00108vf6",
+    "individual"
+  ]
+}

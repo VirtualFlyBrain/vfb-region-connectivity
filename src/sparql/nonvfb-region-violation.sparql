@@ -1,0 +1,13 @@
+# VIOLATION: an edge whose target (the region) is not a VFB region-individual
+# IRI. Only per-side VFB region individuals are allowed as targets; this rejects
+# an FBbt-class target or an anonymous restriction (both blank / non-VFB here).
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+
+SELECT DISTINCT ?ax ?target
+WHERE {
+  ?ax a owl:Axiom ;
+      ?countProp ?value ;
+      owl:annotatedTarget ?target .
+  FILTER(STRSTARTS(STR(?countProp), "http://n2o.neo/custom/"))
+  FILTER(!isIRI(?target) || !STRSTARTS(STR(?target), "http://virtualflybrain.org/reports/VFB_"))
+}

@@ -1,0 +1,18 @@
+# Per-dataset configuration for region-connectivity OWL generation.
+# Each top-level key is a dataset: the <dataset> build arg and the output-file
+# suffix (region_connectivity_<key>.owl). Read by both
+# src/scripts/make_region_connectivity.py and the Makefile (DATASETS list).
+#
+#   site        : VFB Site node short_form (the connectome data source).
+#   roi_dataset : VFB DataSet short_form whose members are the region individuals
+#                 (painted domains).
+#   endpoint    : "kb" (default) or "pdb" — where to query VFB. kb is the source
+#                 graph (holds datasets before they reach pdb).
+
+hemibrain:
+  site: neuprint_JRC_Hemibrain_1point2point1
+  roi_dataset: Xu2020roi
+
+male-cns:
+  site: male-cns_v1_0
+  roi_dataset: Berg2025aroi
