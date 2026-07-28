@@ -167,20 +167,28 @@ def fetch_roi_counts(client, body_ids):
     return pd.concat(frames, ignore_index=True)
 
 
-def get_roi_groups(client):
-    """neuprint ROI name -> region group ('brain' or 'vnc'), from the ROI
-    hierarchy: the top-level 'VNC' branch (and its descendants) are 'vnc', the
-    rest 'brain'. A dataset with no VNC branch is all 'brain' (not split)."""
+def roi_groups_from_hierarchy(root):
+    """neuprint ROI name -> region group ('brain' or 'vnc') from the ROI
+    hierarchy: any 'VNC' node (and its whole subtree) is 'vnc', the rest 'brain'.
+
+    Walks from the root, so it handles a VNC-only dataset whose root *is* 'VNC'
+    (manc), a whole-CNS dataset with a 'VNC' branch (male-cns), and a brain-only
+    dataset with no 'VNC' node (hemibrain -> all 'brain')."""
     groups = {}
 
     def walk(node, g):
+        if node["name"] == "VNC":
+            g = "vnc"
         groups[node["name"]] = g
         for ch in node.get("children") or []:
             walk(ch, g)
 
-    for top in client.meta["roiHierarchy"].get("children") or []:
-        walk(top, "vnc" if top["name"] == "VNC" else "brain")
+    walk(root, "brain")
     return groups
+
+
+def get_roi_groups(client):
+    return roi_groups_from_hierarchy(client.meta["roiHierarchy"])
 
 
 # --- OWL (functional syntax) emission --------------------------------------

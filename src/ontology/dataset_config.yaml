@@ -16,3 +16,15 @@ hemibrain:
 male-cns:
   site: male-cns_v1_0
   roi_dataset: Berg2025aroi
+
+# manc: two Site versions share the same neuron individuals (bodyIds stable); we
+# use the latest, v1.2.1.
+manc:
+  site: neuprint_JRC_Manc_1_2_1
+  roi_dataset: Takemura2023roi
+
+# optic-lobe: the LOP/ME/LO column sub-ROIs have no individual and are dropped
+# (their synapses are counted at the parent neuropil), like male-cns.
+optic-lobe:
+  site: neuprint_JRC_OpticLobe_v1_0_1
+  roi_dataset: Nern2024roi

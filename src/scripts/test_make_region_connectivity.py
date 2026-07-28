@@ -46,6 +46,28 @@ def test_datasets_loaded_from_yaml():
         assert entry["site"] and entry["roi_dataset"]
 
 
+# --- ROI grouping (brain/vnc) ----------------------------------------------
+def test_roi_groups_root_is_vnc():
+    # manc: the hierarchy root itself is 'VNC' -> every ROI is vnc
+    h = {"name": "VNC", "children": [{"name": "LTct"}, {"name": "ANm"}]}
+    assert m.roi_groups_from_hierarchy(h) == {"VNC": "vnc", "LTct": "vnc", "ANm": "vnc"}
+
+
+def test_roi_groups_mixed_cns():
+    # male-cns/optic-lobe: a 'VNC' branch under a CNS root; rest is brain
+    h = {"name": "CNS", "children": [
+        {"name": "Brain", "children": [{"name": "ME(R)"}]},
+        {"name": "VNC", "children": [{"name": "LegNp(T1)(L)"}]},
+    ]}
+    g = m.roi_groups_from_hierarchy(h)
+    assert g["ME(R)"] == "brain" and g["VNC"] == "vnc" and g["LegNp(T1)(L)"] == "vnc"
+
+
+def test_roi_groups_brain_only():
+    h = {"name": "hemibrain", "children": [{"name": "SIP(R)"}]}
+    assert m.roi_groups_from_hierarchy(h) == {"hemibrain": "brain", "SIP(R)": "brain"}
+
+
 # --- ROI label parsing (regression for the backslash bug) ------------------
 def test_roi_from_label_strips_suffix():
     assert m._roi_from_label("SIP(R) on JRC_FlyEM_Hemibrain") == "SIP(R)"
