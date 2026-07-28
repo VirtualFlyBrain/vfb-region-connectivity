@@ -7,10 +7,12 @@ representation already in VFB's production graph (pdb):
   * has presynaptic terminals in  (RO:0002113)  -> annotations: Tbars, downstream
   * has postsynaptic terminal in  (RO:0002110)  -> annotation:  upstream
 
-Counts are pulled fresh from neuprint (neuprint-python) for the neuprint dataset
-that matches the VFB Site node. The count annotations use the n2o `custom:`
-namespace so that `owl2neo4jcsv` turns each axiom into a Neo4j edge carrying the
-counts as edge properties (side-load into pdb via vfb-pipeline-dumps).
+Counts come from the dataset's source (cfg["source"]): either neuprint
+(neuprint-python, for the dataset version matching the VFB Site node) or a flywire
+codex CSV. flywire has no T-bars, so its presynaptic edge carries `downstream`
+(output synapses) instead. The count annotations use the n2o `custom:` namespace
+so that `owl2neo4jcsv` turns each axiom into a Neo4j edge carrying the counts as
+edge properties (side-load into pdb via vfb-pipeline-dumps).
 
 Each edge is an ObjectPropertyAssertion to a VFB region *individual*; the
 individual is side-specific, so laterality is carried by the target.
@@ -45,17 +47,27 @@ RO_POST = "http://purl.obolibrary.org/obo/RO_0002110"  # has postsynaptic termin
 RO_PRE = "http://purl.obolibrary.org/obo/RO_0002113"   # has presynaptic terminals in
 CUSTOM = "http://n2o.neo/custom/"                       # -> Neo4j edge properties
 
-# neuprint roi_counts_df column -> custom annotation local name, per relation.
-# (matches existing pdb edge properties)
-# Each relation has a PRIMARY count that gates edge emission — the edge means the
-# neuron has those *terminals* in the region, so a presynaptic edge requires
-# T-bars (pre), not just a stray downstream connection count — plus optional
-# secondary counts. (relation, primary neuprint col, primary local,
-# ((secondary col, secondary local), ...))
-EDGE_SPECS = (
-    (RO_POST, "upstream", "upstream", ()),
-    (RO_PRE, "pre", "Tbars", (("downstream", "downstream"),)),
-)
+# source count column -> custom annotation local name, per relation, keyed by the
+# dataset's count schema (cfg["counts"], default "neuprint"). Each relation has a
+# PRIMARY count that gates edge emission — the edge means the neuron has those
+# *terminals* in the region, so an edge is only emitted where the primary count is
+# present — plus optional secondary counts.
+# (relation, primary source col, primary annotation local, ((secondary col, local), ...))
+EDGE_SPECS = {
+    # neuprint roi_counts_df: presynaptic edge gated on T-bars (pre); downstream
+    # is a secondary count. Matches the existing pdb edge properties.
+    "neuprint": (
+        (RO_POST, "upstream", "upstream", ()),
+        (RO_PRE, "pre", "Tbars", (("downstream", "downstream"),)),
+    ),
+    # flywire has a single synapse count per direction (no T-bars): input synapses
+    # -> upstream (postsynaptic edge), output synapses -> downstream (presynaptic
+    # edge, gated on the output count).
+    "flywire": (
+        (RO_POST, "upstream", "upstream", ()),
+        (RO_PRE, "downstream", "downstream", ()),
+    ),
+}
 # deterministic ordering of count annotations within an axiom
 _LOCAL_ORDER = {"upstream": 0, "Tbars": 1, "downstream": 2}
 
@@ -88,9 +100,8 @@ def load_datasets(path=DATASET_CONFIG):
 DATASETS = load_datasets()
 
 
-def get_neuprint_dataset(site, url=KB):
-    """Derive the neuprint dataset string (e.g. 'hemibrain:v1.2.1') from the
-    Site node, so the counts come from the version VFB is pinned to."""
+def _site_link_texts(site, url):
+    """The Site node's link_base / homepage strings (source-data links)."""
     df = query_neo4j(
         'MATCH (s:Site {short_form:"%s"}) RETURN s.link_base AS lb, s.homepage AS hp'
         % site,
@@ -98,14 +109,61 @@ def get_neuprint_dataset(site, url=KB):
     )
     if df is False or df.empty:
         raise RuntimeError(f"Site node {site} not found")
+    texts = []
     for col in ("lb", "hp"):
         val = df.iloc[0][col]
         text = val[0] if isinstance(val, list) and val else val
         if isinstance(text, str):
-            m = re.search(r"dataset=([^&\s]+)", text)
-            if m:
-                return unquote(m.group(1))  # link_base may be URL-encoded (%3A -> :)
+            texts.append(unquote(text))  # link_base may be URL-encoded (%3A -> :)
+    return texts
+
+
+def get_neuprint_dataset(site, url=KB):
+    """Derive the neuprint dataset string (e.g. 'hemibrain:v1.2.1') from the
+    Site node, so the counts come from the version VFB is pinned to."""
+    for text in _site_link_texts(site, url):
+        m = re.search(r"dataset=([^&\s]+)", text)
+        if m:
+            return m.group(1)
     raise RuntimeError(f"Could not derive neuprint dataset from Site {site}")
+
+
+def get_flywire_provenance(site, url=KB):
+    """Provenance string 'flywire:<data_version>' from the flywire Site node
+    (link_base carries data_version=<n>, e.g. 783). Used as dcterms:source and
+    for the versionInfo, mirroring the neuprint '<name>:<version>' shape."""
+    for text in _site_link_texts(site, url):
+        m = re.search(r"data_version=(\d+)", text)
+        if m:
+            return "flywire:%s" % m.group(1)
+    raise RuntimeError(f"Could not derive flywire version from Site {site}")
+
+
+def load_flywire_counts(csv_source, body_ids):
+    """Read the flywire neuropil_synapse_table (one row per root_id, wide
+    'input synapses in <R>' / 'output synapses in <R>' columns) and reshape to the
+    long [bodyId, roi, upstream, downstream] form build_axioms expects.
+
+    input synapses -> upstream (postsynaptic edge), output synapses -> downstream
+    (presynaptic edge). csv_source is a path or URL (gzip inferred). partners
+    columns are ignored."""
+    df = pd.read_csv(csv_source)
+    ids = {int(b) for b in body_ids}
+    df = df[df["root_id"].isin(ids)]
+    pre = "input synapses in "
+    post = "output synapses in "
+    in_cols = {c: c[len(pre):] for c in df.columns if c.startswith(pre)}
+    out_cols = {c: c[len(post):] for c in df.columns if c.startswith(post)}
+    ins = df.melt(id_vars="root_id", value_vars=list(in_cols),
+                  var_name="roi", value_name="upstream")
+    ins["roi"] = ins["roi"].map(in_cols)
+    outs = df.melt(id_vars="root_id", value_vars=list(out_cols),
+                   var_name="roi", value_name="downstream")
+    outs["roi"] = outs["roi"].map(out_cols)
+    m = ins.merge(outs, on=["root_id", "roi"], how="outer").rename(columns={"root_id": "bodyId"})
+    # keep only (neuron, region) pairs with at least one synapse in either direction
+    m = m[(m["upstream"].fillna(0) > 0) | (m["downstream"].fillna(0) > 0)]
+    return m[["bodyId", "roi", "upstream", "downstream"]].reset_index(drop=True)
 
 
 def get_bodyid_to_neuron(site, url=KB):
@@ -225,7 +283,7 @@ def _relation_axiom(neuron_iri, target_iri, prop, anns):
     )
 
 
-def build_axioms(counts, bodyid2neuron, roi2region):
+def build_axioms(counts, bodyid2neuron, roi2region, edge_specs=EDGE_SPECS["neuprint"]):
     """One ObjectPropertyAssertion per (neuron, region individual, relation).
     Region individuals are side-specific, so laterality is carried by the target."""
     axioms = []
@@ -238,7 +296,7 @@ def build_axioms(counts, bodyid2neuron, roi2region):
         target = roi2region.get(row["roi"])
         if neuron is None or target is None:
             continue
-        for rel, pcol, plocal, secondary in EDGE_SPECS:
+        for rel, pcol, plocal, secondary in edge_specs:
             cs = _edge_counts(row, pcol, plocal, secondary)
             if cs is not None:
                 axioms.append(_relation_axiom(neuron, target, rel, _count_annotations(cs)))
@@ -246,7 +304,7 @@ def build_axioms(counts, bodyid2neuron, roi2region):
     return axioms, used_props
 
 
-def write_ontology(path, dataset_key, neuprint_dataset, axioms, used_props):
+def write_ontology(path, dataset_key, source_id, axioms, used_props):
     onto_iri = (
         "http://virtualflybrain.org/data/VFB/OWL/region_connectivity_%s.owl"
         % dataset_key
@@ -258,8 +316,8 @@ def write_ontology(path, dataset_key, neuprint_dataset, axioms, used_props):
         for n in sorted(used_anns)
     ]
     decls += ["Declaration(ObjectProperty(<%s>))" % p for p in sorted(used_props)]
-    # neuprint dataset is "<name>:<version>", e.g. hemibrain:v1.2.1
-    version = neuprint_dataset.partition(":")[2] or neuprint_dataset
+    # source_id is "<name>:<version>", e.g. hemibrain:v1.2.1 or flywire:783
+    version = source_id.partition(":")[2] or source_id
     lines = [
         "Prefix(:=<http://purl.obolibrary.org/obo/>)",
         "Prefix(owl:=<http://www.w3.org/2002/07/owl#>)",
@@ -269,10 +327,10 @@ def write_ontology(path, dataset_key, neuprint_dataset, axioms, used_props):
         "",
         "Ontology(<%s>" % onto_iri,
         'Annotation(rdfs:comment "Region (neuropil) synaptic connectivity for '
-        '%s, generated from neuprint %s.")' % (dataset_key, neuprint_dataset),
+        '%s, generated from %s.")' % (dataset_key, source_id),
         'Annotation(dcterms:title "VFB region connectivity: %s")' % dataset_key,
         'Annotation(dcterms:identifier "%s")' % dataset_key,
-        'Annotation(dcterms:source "%s")' % neuprint_dataset,
+        'Annotation(dcterms:source "%s")' % source_id,
         'Annotation(owl:versionInfo "%s")' % version,
         "",
     ]
@@ -315,41 +373,48 @@ def main():
         sys.exit("unknown dataset %r; configured: %s"
                  % (dataset_key, ", ".join(sorted(DATASETS))))
     cfg = DATASETS[dataset_key]
-    token = open(os.path.expanduser(token_file)).read().strip()
+    source = cfg.get("source", "neuprint")
 
     # Default to the kb: dataset updates land there first (needed to migrate to
     # a new dataset version before it reaches pdb).
     url = ENDPOINTS[cfg.get("endpoint", "kb")]
 
-    neuprint_dataset = get_neuprint_dataset(cfg["site"], url)
-    print("neuprint dataset:", neuprint_dataset)
-
     bodyid2neuron = get_bodyid_to_neuron(cfg["site"], url)
     print("VFB neurons:", len(bodyid2neuron))
-
     roi2region = get_roi_to_region(cfg["roi_dataset"], url)
     print("regions mapped:", len(roi2region))
 
-    client = neuprint.Client("https://neuprint.janelia.org", dataset=neuprint_dataset, token=token)
-    roi_group = get_roi_groups(client)
-    counts = fetch_roi_counts(client, bodyid2neuron.keys())
-    print("neuprint roi-count rows:", len(counts))
+    if source == "neuprint":
+        source_id = get_neuprint_dataset(cfg["site"], url)
+        print("neuprint dataset:", source_id)
+        token = open(os.path.expanduser(token_file)).read().strip()
+        client = neuprint.Client("https://neuprint.janelia.org", dataset=source_id, token=token)
+        roi_group = get_roi_groups(client)
+        counts = fetch_roi_counts(client, bodyid2neuron.keys())
+    elif source == "flywire":
+        source_id = get_flywire_provenance(cfg["site"], url)
+        print("flywire source:", source_id)
+        counts = load_flywire_counts(cfg["csv_url"], bodyid2neuron.keys())
+        roi_group = {r: "brain" for r in roi2region}  # FAFB is brain-only (no VNC)
+    else:
+        sys.exit("unknown source %r for dataset %s" % (source, dataset_key))
+    print("region-count rows:", len(counts))
 
     os.makedirs(report_dir, exist_ok=True)
     # roi_group only annotates the report's `group` column (brain/vnc); one file
     # per dataset (a whole-CNS dataset stays well under GitHub's size limit).
     write_roi_report(os.path.join(report_dir, "roi_mapping.tsv"), counts, roi2region, roi_group)
 
-    axioms, used_props = build_axioms(counts, bodyid2neuron, roi2region)
+    axioms, used_props = build_axioms(counts, bodyid2neuron, roi2region, EDGE_SPECS[source])
     print("axioms:", len(axioms))
 
     qc_dir = os.path.join(out_dir, "qc")
     os.makedirs(qc_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "region_connectivity_%s.ofn" % dataset_key)
-    write_ontology(out_path, dataset_key, neuprint_dataset, axioms, used_props)
+    write_ontology(out_path, dataset_key, source_id, axioms, used_props)
     # small sample for build-time QC (full file is too large for robot verify)
     write_ontology(os.path.join(qc_dir, "region_connectivity_%s.ofn" % dataset_key),
-                   dataset_key, neuprint_dataset, axioms[:SAMPLE_AXIOMS], used_props)
+                   dataset_key, source_id, axioms[:SAMPLE_AXIOMS], used_props)
     print("wrote", out_path)
 
 

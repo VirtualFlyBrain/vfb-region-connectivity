@@ -28,7 +28,7 @@ DATASETS := $(shell grep -E '^[A-Za-z0-9._-]+:' $(DATASET_CONFIG) | sed 's/:.*//
 RELEASEDIR = ../..
 REGION_FILES = $(patsubst %, $(RELEASEDIR)/region_connectivity_%.owl, $(DATASETS))
 # shape checks run on a small QC sample of each generated file (build-time)
-RC_QUERIES = $(foreach V,post-edge-missing-upstream pre-edge-missing-tbars \
+RC_QUERIES = $(foreach V,post-edge-missing-upstream pre-edge-missing-count \
 	nonpositive-count unexpected-connectivity-relation unexpected-count-annotation \
 	nonvfb-neuron nonvfb-region,\
 	$(SPARQLDIR)/$(V)-violation.sparql)

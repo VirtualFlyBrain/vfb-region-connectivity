@@ -8,6 +8,9 @@
 #                 (painted domains).
 #   endpoint    : "kb" (default) or "pdb" — where to query VFB. kb is the source
 #                 graph (holds datasets before they reach pdb).
+#   source      : "neuprint" (default) — pull counts from neuprint-python; or
+#                 "flywire" — read counts from a flywire codex CSV (csv_url).
+#   csv_url     : (source: flywire) URL/path of the neuropil_synapse_table CSV.
 
 hemibrain:
   site: neuprint_JRC_Hemibrain_1point2point1
@@ -28,3 +31,12 @@ manc:
 optic-lobe:
   site: neuprint_JRC_OpticLobe_v1_0_1
   roi_dataset: Nern2024roi
+
+# flywire (FAFB): not in neuprint. Counts come from the codex per-neuron neuropil
+# synapse table (input/output synapses per region); no T-bars, so the presynaptic
+# edge carries `downstream`. Release 783 (matches the flywire783 Site).
+flywire:
+  site: flywire783
+  roi_dataset: Dorkenwald2023roi
+  source: flywire
+  csv_url: https://storage.googleapis.com/flywire-data/codex/data/fafb/783/neuropil_synapse_table.csv.gz

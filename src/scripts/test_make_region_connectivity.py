@@ -21,7 +21,7 @@ FIX = os.path.join(os.path.dirname(__file__), "test_data")
 SPARQL = os.path.join(os.path.dirname(__file__), "..", "sparql")
 RC_CHECKS = [
     "post-edge-missing-upstream",
-    "pre-edge-missing-tbars",
+    "pre-edge-missing-count",
     "nonpositive-count",
     "unexpected-connectivity-relation",
     "unexpected-count-annotation",
@@ -83,8 +83,8 @@ def test_roi_from_label_handles_list():
 
 
 # --- edge counts (primary gates the edge) ----------------------------------
-POST = (m.RO_POST, "upstream", "upstream", ())
-PRE = (m.RO_PRE, "pre", "Tbars", (("downstream", "downstream"),))
+POST, PRE = m.EDGE_SPECS["neuprint"]
+FW_POST, FW_PRE = m.EDGE_SPECS["flywire"]
 
 
 def test_edge_counts_postsynaptic():
@@ -98,6 +98,13 @@ def test_edge_counts_presynaptic_requires_tbars():
     assert m._edge_counts({"pre": 3, "downstream": 0}, *PRE[1:]) == {"Tbars": 3}
     # no T-bars -> no presynaptic edge even if downstream > 0 (the male-cns case)
     assert m._edge_counts({"pre": 0, "downstream": 4}, *PRE[1:]) is None
+
+
+def test_edge_counts_flywire_presynaptic_uses_downstream():
+    # flywire: no Tbars; the presynaptic edge is gated on the output count (downstream)
+    assert m._edge_counts({"upstream": 5, "downstream": 8}, *FW_PRE[1:]) == {"downstream": 8}
+    assert m._edge_counts({"upstream": 5, "downstream": 0}, *FW_PRE[1:]) is None
+    assert m._edge_counts({"upstream": 5}, *FW_POST[1:]) == {"upstream": 5}
 
 
 # --- axiom shape -----------------------------------------------------------
@@ -137,6 +144,43 @@ def test_build_axioms_scl_emits_only_postsynaptic():
     scl = [a for a in axioms if "http://vfb/scl" in a]
     assert len(scl) == 1
     assert m.RO_POST in scl[0] and m.RO_PRE not in scl[0]
+
+
+# --- flywire (CSV source, upstream+downstream, no Tbars) -------------------
+def _fw_counts():
+    return pd.DataFrame([
+        {"bodyId": 1, "roi": "ME_L", "upstream": 12, "downstream": 8},
+        {"bodyId": 1, "roi": "EB", "upstream": 0, "downstream": 5},   # pre-only
+        {"bodyId": 1, "roi": "LO_R", "upstream": 4, "downstream": 0},  # post-only
+    ])
+
+
+def test_build_axioms_flywire_uses_downstream_no_tbars():
+    axioms, props = m.build_axioms(_fw_counts(), {1: "http://vfb/n1"},
+                                   {"ME_L": "http://vfb/me", "EB": "http://vfb/eb",
+                                    "LO_R": "http://vfb/lo"}, m.EDGE_SPECS["flywire"])
+    # ME_L: post+pre=2 ; EB: pre only=1 ; LO_R: post only=1
+    assert len(axioms) == 4
+    assert props == {m.RO_POST, m.RO_PRE}
+    assert not any("Tbars" in a for a in axioms)            # flywire has no T-bars
+    pre_axioms = [a for a in axioms if m.RO_PRE in a]
+    assert pre_axioms and all("custom/downstream" in a for a in pre_axioms)
+
+
+def test_load_flywire_counts_reshapes_wide_table(tmp_path):
+    csv = tmp_path / "syn.csv"
+    csv.write_text(
+        "root_id,input synapses,output synapses,"
+        "input synapses in ME_L,output synapses in ME_L,"
+        "input synapses in EB,output synapses in EB,"
+        "input partners in ME_L,output partners in ME_L\n"
+        "1,16,5,12,0,4,5,3,0\n"        # ME_L post-only, EB pre-only
+        "2,0,0,0,0,0,0,0,0\n"          # neuron with no synapses -> no rows
+        "3,1,1,0,0,0,0,0,0\n")         # root_id 3 not requested -> excluded
+    df = m.load_flywire_counts(str(csv), body_ids=[1, 2])
+    rows = {(int(r.bodyId), r.roi): (r.upstream, r.downstream) for r in df.itertuples()}
+    assert rows == {(1, "ME_L"): (12, 0), (1, "EB"): (4, 5)}   # partners ignored
+    assert 3 not in {b for b, _ in rows}
 
 
 # --- reports & ontology ----------------------------------------------------
@@ -214,6 +258,37 @@ def test_male_cns_individual_path(tmp_path, monkeypatch):
     assert "_left" not in text and "_right" not in text  # no side-specific annotations
 
 
+def _flywire(monkeypatch, tmp_path):
+    """flywire main() offline: kb lookups + the CSV load are stubbed."""
+    b2n = {1: "http://virtualflybrain.org/reports/VFB_fw00000001"}
+    r2r = {"ME_L": "http://virtualflybrain.org/reports/VFB_fw000000me",
+           "EB": "http://virtualflybrain.org/reports/VFB_fw000000eb",
+           "LO_R": "http://virtualflybrain.org/reports/VFB_fw000000lo"}
+    monkeypatch.setattr(m, "get_flywire_provenance", lambda site, url=None: "flywire:783")
+    monkeypatch.setattr(m, "get_bodyid_to_neuron", lambda site, url=None: b2n)
+    monkeypatch.setattr(m, "get_roi_to_region", lambda ds, url=None: r2r)
+    monkeypatch.setattr(m, "load_flywire_counts", lambda src, ids: _fw_counts())
+    token = tmp_path / "token.txt"; token.write_text("dummy")
+    out_dir = tmp_path / "out"; out_dir.mkdir()
+    report_dir = tmp_path / "report"
+    monkeypatch.setattr(sys, "argv", ["prog", "flywire", str(token), str(out_dir), str(report_dir)])
+    m.main()
+    return report_dir, sorted(out_dir.glob("region_connectivity_*.ofn"))
+
+
+def test_flywire_path(tmp_path, monkeypatch):
+    report_dir, ofns = _flywire(monkeypatch, tmp_path)
+    assert [o.name for o in ofns] == ["region_connectivity_flywire.ofn"]
+    text = ofns[0].read_text()
+    assert 'dcterms:source "flywire:783"' in text and 'owl:versionInfo "783"' in text
+    assert "ObjectPropertyAssertion(" in text
+    assert "custom/downstream" in text and "custom/Tbars" not in text  # no T-bars
+    # FAFB is brain-only: mapped ROIs grouped 'brain'
+    rows = {ln.split("\t")[0]: ln.split("\t")
+            for ln in (report_dir / "roi_mapping.tsv").read_text().splitlines()[1:]}
+    assert rows["ME_L"][1] == "brain"
+
+
 def test_individual_pipeline_from_sample(tmp_path, monkeypatch):
     counts, r2r, report_dir, ofns = _hemibrain(monkeypatch, tmp_path)
     # brain-only -> a single, unsuffixed file
@@ -253,6 +328,14 @@ def test_male_cns_sample_passes_shape_checks(tmp_path, monkeypatch):
     _report_dir, ofns = _male_cns(monkeypatch, tmp_path)
     for ofn in ofns:
         assert _shape_check(ofn, tmp_path) == 0
+
+
+@pytest.mark.skipif(shutil.which("robot") is None, reason="ROBOT not on PATH")
+def test_flywire_sample_passes_shape_checks(tmp_path, monkeypatch):
+    # flywire pre edges carry `downstream` (no Tbars) -> the relaxed
+    # pre-edge-missing-count check must still pass.
+    _report_dir, ofns = _flywire(monkeypatch, tmp_path)
+    assert _shape_check(ofns[0], tmp_path) == 0
 
 
 # --- the checks must REJECT the shapes we no longer emit -------------------

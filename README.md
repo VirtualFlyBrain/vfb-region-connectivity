@@ -11,9 +11,11 @@ region_connectivity_<dataset>.owl
 ```
 
 Each file records, for every neuron that has a VFB individual, how many synapses
-that neuron has in each neuropil region — the per-region tallies that neuprint
-reports in `roiInfo`. Even a whole-CNS dataset (male-cns, banc) compresses to a
-few tens of MB as a single file, so no splitting is needed.
+that neuron has in each neuropil region. Counts come from the dataset's source —
+either [neuprint](https://neuprint.janelia.org) (hemibrain, male-cns, manc,
+optic-lobe) or a [flywire codex](https://codex.flywire.ai) CSV (flywire/FAFB).
+Even a whole-CNS dataset compresses to a few tens of MB as a single file, so no
+splitting is needed.
 
 ## Representation
 
@@ -25,8 +27,12 @@ representation already present in VFB's production graph (`pdb`):
 
 | Relation | IRI | Direction | Count annotations |
 |---|---|---|---|
-| has presynaptic terminals in | `RO:0002113` | outputs | `Tbars` (T-bars / `pre`), `downstream` |
+| has presynaptic terminals in | `RO:0002113` | outputs | `Tbars` (T-bars / `pre`) + `downstream` (neuprint); `downstream` only (flywire) |
 | has postsynaptic terminal in | `RO:0002110` | inputs | `upstream` |
+
+flywire has no T-bar annotation, so its presynaptic edge carries only
+`downstream` (the output-synapse count); its postsynaptic edge carries `upstream`
+(the input-synapse count).
 
 Counts are typed `xsd:float` in the OWL (pdb stores them as float, e.g. `545.0`);
 the reports cast them back to integers for readability. A postsynaptic
@@ -64,28 +70,35 @@ ObjectPropertyAssertion(
 
 ## Data source
 
-Counts are pulled fresh from [neuprint](https://neuprint.janelia.org) with
-`neuprint-python`. The neuprint dataset (e.g. `hemibrain:v1.2.1`) is **derived
-from the VFB Site node** (`dataset=...` in its `link_base`), so the data always
-matches the version VFB is pinned to rather than a hard-coded string.
+The count source is set per dataset (`source` in `dataset_config.yaml`):
 
-The neuron and region identifiers come from VFB's Neo4j. By default this is the
-**knowledge base (`kb`)**, not `pdb`: dataset updates land in the kb first, so a
-new dataset version can be built before it reaches `pdb`. (An `endpoint: pdb`
+* **`neuprint`** (default) — counts pulled fresh with `neuprint-python`. The
+  neuprint dataset (e.g. `hemibrain:v1.2.1`) is **derived from the VFB Site node**
+  (`dataset=...` in its `link_base`), so it always matches the version VFB is
+  pinned to. Uses neuprint's `roiInfo` (`pre`/`upstream`/`downstream`).
+* **`flywire`** — counts read from a flywire codex CSV (`csv_url`, the
+  `neuropil_synapse_table` for release 783). One value per direction per region
+  (`input synapses in <R>` → `upstream`, `output synapses in <R>` → `downstream`);
+  no T-bars. The version (`flywire:783`) is derived from the Site's `data_version`.
+
+The neuron and region identifiers always come from VFB's Neo4j. By default this
+is the **knowledge base (`kb`)**, not `pdb`: dataset updates land in the kb first,
+so a new dataset version can be built before it reaches `pdb`. (An `endpoint: pdb`
 per-dataset override is available.) Neurons are the non-deprecated `Individual`s
 cross-referenced to the Site — i.e. the cell-typed subset VFB loads.
 
-* **bodyId → VFB neuron IRI** — via the `database_cross_reference` accession to the
-  dataset's Site node.
-* **neuprint ROI → VFB region individual** (`roi_dataset`): the per-side
+* **bodyId / root_id → VFB neuron IRI** — via the `database_cross_reference`
+  accession to the dataset's Site node.
+* **region name → VFB region individual** (`roi_dataset`): the per-side
   individuals that `has_source` the dataset's ROI `DataSet` (hemibrain
-  `Xu2020roi`, male-cns `Berg2025aroi`, banc `Bates2026roi`). The ROI name is the
-  region label minus the `" on <template>"` suffix.
+  `Xu2020roi`, male-cns `Berg2025aroi`, manc `Takemura2023roi`, optic-lobe
+  `Nern2024roi`, flywire `Dorkenwald2023roi`). The name is the region label minus
+  the `" on <template>"` suffix.
 
-Only ROIs that resolve to a region individual are emitted; this drops ROIs with no mapping
-(neuprint super-ROIs like `SNP(R)`/`INP`, and male-cns's optic-lobe column
-sub-ROIs — whose synapses are already counted at their parent region), which are
-listed in the ROI-mapping report.
+Only regions that resolve to an individual are emitted; this drops names with no
+mapping (neuprint super-ROIs like `SNP(R)`/`INP`, optic-lobe column sub-ROIs whose
+synapses are already counted at their parent region, and flywire's `UNASGD`),
+which are listed in the ROI-mapping report.
 
 ## Building
 
@@ -139,7 +152,8 @@ output to exactly the shape we now emit — a direct `ObjectPropertyAssertion` f
 a VFB neuron to a VFB region individual, annotated with the three totals:
 
 * every postsynaptic (`RO:0002110`) edge has an `upstream`, every presynaptic
-  (`RO:0002113`) edge has a `Tbars`, and counts are positive;
+  (`RO:0002113`) edge has a presynaptic count (`Tbars` for neuprint, or
+  `downstream` for flywire), and counts are positive;
 * counts sit **only** on `upstream`/`Tbars`/`downstream` (no stray or per-side
   annotation) and **only** on those two relations (any `rdf:type`/class-form
   axiom is rejected);
@@ -162,10 +176,13 @@ guaranteed by construction in `build_axioms`.
 
 * **unit tests** of the pure logic — ROI-label parsing (incl. the backslash fix),
   edge-count gating, aggregation, report generation, header metadata;
-* **offline pipeline tests** — network calls are stubbed with *saved* samples in
+* **offline pipeline tests** — network calls (and the flywire CSV read) are
+  stubbed with *saved* samples in
   [`src/scripts/test_data/`](src/scripts/test_data), and the real transform runs
-  end-to-end through `main()` for hemibrain and male-cns; each output is
-  ROBOT-converted and run through the `src/sparql/*-violation.sparql` shape checks.
+  end-to-end through `main()` for a neuprint dataset (hemibrain, male-cns) and the
+  flywire CSV path; each output is ROBOT-converted and run through the
+  `src/sparql/*-violation.sparql` shape checks (which also assert the disallowed
+  shapes are rejected).
 
 ```bash
 pip install -r src/scripts/requirements.txt pytest && pytest src/scripts
@@ -174,7 +191,7 @@ pip install -r src/scripts/requirements.txt pytest && pytest src/scripts
 The [`qc.yml`](.github/workflows/qc.yml) GitHub Actions workflow runs the pytest
 suite above on every push/PR (in the ODK image, no neuprint token needed). The
 full committed artifacts are not shape-checked in CI — that doesn't fit in a
-runner's memory at connectome scale; the sample checks cover both forms.
+runner's memory at connectome scale; the sample checks cover every source path.
 
 To refresh the sample after a neuprint/schema change, regenerate the three files
 in `test_data/` from a small fixed set of bodyIds.
@@ -187,13 +204,17 @@ single source of truth, read by both the generator and the Makefile:
 
 ```yaml
 <dataset-key>:
-  site: <VFB Site short_form>          # the connectome data source
+  site: <VFB Site short_form>            # the connectome data source
   roi_dataset: <VFB DataSet short_form>  # the region individuals
-  # endpoint: pdb                      # optional; defaults to kb
+  # endpoint: pdb                        # optional; defaults to kb
+  # source: flywire                      # optional; defaults to neuprint
+  # csv_url: https://…/table.csv.gz      # required when source: flywire
 ```
 
 The top-level key is the `<dataset>` build arg and the output-file suffix. No
-code or Makefile change is needed — `make region_connectivity` picks it up.
+code or Makefile change is needed — `make region_connectivity` picks it up. A
+neuprint dataset needs only `site` + `roi_dataset`; a flywire dataset also needs
+`source: flywire` and the `csv_url` of its `neuropil_synapse_table` CSV.
 
 The region individuals must exist in VFB first (loaded from the connectome's
 painted-domain ROIs). ROIs with no individual are dropped and flagged in
