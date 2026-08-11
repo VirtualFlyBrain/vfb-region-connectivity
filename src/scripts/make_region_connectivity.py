@@ -246,7 +246,15 @@ def roi_groups_from_hierarchy(root):
 
 
 def get_roi_groups(client):
-    return roi_groups_from_hierarchy(client.meta["roiHierarchy"])
+    root = client.meta["roiHierarchy"]
+    groups = roi_groups_from_hierarchy(root)
+    # Some roiInfo ROIs are absent from the hierarchy tree (e.g. hemibrain
+    # FB-column3). They can't be under the VNC branch, so default them to the
+    # root's group (brain, unless the whole dataset is VNC-rooted like manc).
+    root_group = groups.get(root.get("name"), "brain")
+    for roi in client.meta.get("roiInfo", {}):
+        groups.setdefault(roi, root_group)
+    return groups
 
 
 # --- OWL (functional syntax) emission --------------------------------------

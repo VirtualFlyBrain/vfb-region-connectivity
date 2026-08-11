@@ -68,6 +68,26 @@ def test_roi_groups_brain_only():
     assert m.roi_groups_from_hierarchy(h) == {"hemibrain": "brain", "SIP(R)": "brain"}
 
 
+class _StubClient:
+    def __init__(self, meta):
+        self.meta = meta
+
+
+def test_get_roi_groups_defaults_rois_absent_from_hierarchy():
+    # FB-column3 is in roiInfo but not in the hierarchy tree -> default to root group (brain)
+    meta = {"roiHierarchy": {"name": "hemibrain", "children": [{"name": "FB"}]},
+            "roiInfo": {"FB": {}, "FB-column3": {}}}
+    g = m.get_roi_groups(_StubClient(meta))
+    assert g["FB"] == "brain" and g["FB-column3"] == "brain"
+
+
+def test_get_roi_groups_vnc_rooted_defaults_to_vnc():
+    meta = {"roiHierarchy": {"name": "VNC", "children": [{"name": "LTct"}]},
+            "roiInfo": {"LTct": {}, "SomeExtra": {}}}
+    g = m.get_roi_groups(_StubClient(meta))
+    assert g["LTct"] == "vnc" and g["SomeExtra"] == "vnc"
+
+
 # --- ROI label parsing (regression for the backslash bug) ------------------
 def test_roi_from_label_strips_suffix():
     assert m._roi_from_label("SIP(R) on JRC_FlyEM_Hemibrain") == "SIP(R)"

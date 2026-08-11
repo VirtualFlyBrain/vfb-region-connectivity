@@ -1,16 +1,5 @@
 roi	group	target	neurons
-CX	unmapped		2978
-INP	unmapped		9860
-LX(L)	unmapped		1296
-LX(R)	unmapped		2819
-MB(+ACA)(R)	unmapped		4422
 NotPrimary	unmapped		22705
-OL(R)	unmapped		3271
-PENP	unmapped		1553
-SNP(L)	unmapped		2801
-SNP(R)	unmapped		8549
-VLNP(R)	unmapped		10843
-VMNP	unmapped		4523
 AB(L)	brain	http://virtualflybrain.org/reports/VFB_00102288	100
 AB(R)	brain	http://virtualflybrain.org/reports/VFB_00101399	177
 AL(L)	brain	http://virtualflybrain.org/reports/VFB_00101484	1038
@@ -108,6 +97,7 @@ CRE(-ROB,-RUB)(R)	brain	http://virtualflybrain.org/reports/VFB_001012c5	2804
 CRE(-RUB)(L)	brain	http://virtualflybrain.org/reports/VFB_001012c6	1509
 CRE(L)	brain	http://virtualflybrain.org/reports/VFB_00101512	1509
 CRE(R)	brain	http://virtualflybrain.org/reports/VFB_00101438	2805
+CX	brain	http://virtualflybrain.org/reports/VFB_001011d3	2978
 EB	brain	http://virtualflybrain.org/reports/VFB_00101400	555
 EBr1	brain	http://virtualflybrain.org/reports/VFB_001011d5	251
 EBr2r4	brain	http://virtualflybrain.org/reports/VFB_001011d7	398
@@ -139,6 +129,7 @@ GOR(R)	brain	http://virtualflybrain.org/reports/VFB_00101453	1097
 IB	brain	http://virtualflybrain.org/reports/VFB_00101443	2259
 ICL(L)	brain	http://virtualflybrain.org/reports/VFB_00101530	1041
 ICL(R)	brain	http://virtualflybrain.org/reports/VFB_00101442	3488
+INP	brain	http://virtualflybrain.org/reports/VFB_001011dq	9860
 IPS(R)	brain	http://virtualflybrain.org/reports/VFB_00101455	1174
 LAL(-GA)(R)	brain	http://virtualflybrain.org/reports/VFB_001012c3	2658
 LAL(L)	brain	http://virtualflybrain.org/reports/VFB_00101526	1023
@@ -146,6 +137,9 @@ LAL(R)	brain	http://virtualflybrain.org/reports/VFB_00101403	2677
 LH(R)	brain	http://virtualflybrain.org/reports/VFB_00101434	2966
 LO(R)	brain	http://virtualflybrain.org/reports/VFB_00101387	3118
 LOP(R)	brain	http://virtualflybrain.org/reports/VFB_00101388	135
+LX(L)	brain	http://virtualflybrain.org/reports/VFB_001011ds	1296
+LX(R)	brain	http://virtualflybrain.org/reports/VFB_001011dt	2819
+MB(+ACA)(R)	brain	http://virtualflybrain.org/reports/VFB_001011du	4422
 MB(L)	brain	http://virtualflybrain.org/reports/VFB_001011dv	747
 MB(R)	brain	http://virtualflybrain.org/reports/VFB_001011dw	3488
 ME(R)	brain	http://virtualflybrain.org/reports/VFB_00101385	63
@@ -158,6 +152,7 @@ NO2(L)	brain	http://virtualflybrain.org/reports/VFB_00101553	93
 NO2(R)	brain	http://virtualflybrain.org/reports/VFB_00101546	79
 NO3(L)	brain	http://virtualflybrain.org/reports/VFB_00101554	235
 NO3(R)	brain	http://virtualflybrain.org/reports/VFB_00101548	227
+OL(R)	brain	http://virtualflybrain.org/reports/VFB_001011dx	3271
 PB	brain	http://virtualflybrain.org/reports/VFB_00101401	802
 PB(L1)	brain	http://virtualflybrain.org/reports/VFB_00101498	108
 PB(L2)	brain	http://virtualflybrain.org/reports/VFB_00101499	113
@@ -178,6 +173,7 @@ PB(R7)	brain	http://virtualflybrain.org/reports/VFB_00101495	142
 PB(R8)	brain	http://virtualflybrain.org/reports/VFB_00101496	129
 PB(R9)	brain	http://virtualflybrain.org/reports/VFB_00101497	123
 PED(R)	brain	http://virtualflybrain.org/reports/VFB_00101390	2119
+PENP	brain	http://virtualflybrain.org/reports/VFB_001011dy	1553
 PLP(R)	brain	http://virtualflybrain.org/reports/VFB_00101417	6542
 POC	brain	http://virtualflybrain.org/reports/VFB_00101485	321
 PRW	brain	http://virtualflybrain.org/reports/VFB_00101460	7
@@ -194,10 +190,14 @@ SIP(R)	brain	http://virtualflybrain.org/reports/VFB_00101436	4223
 SLP(R)	brain	http://virtualflybrain.org/reports/VFB_00101435	5818
 SMP(L)	brain	http://virtualflybrain.org/reports/VFB_00101507	2767
 SMP(R)	brain	http://virtualflybrain.org/reports/VFB_00101437	4947
+SNP(L)	brain	http://virtualflybrain.org/reports/VFB_001011dz	2801
+SNP(R)	brain	http://virtualflybrain.org/reports/VFB_001011e0	8549
 SPS(L)	brain	http://virtualflybrain.org/reports/VFB_00101532	1178
 SPS(R)	brain	http://virtualflybrain.org/reports/VFB_00101454	3083
 VES(L)	brain	http://virtualflybrain.org/reports/VFB_00101535	594
 VES(R)	brain	http://virtualflybrain.org/reports/VFB_00101450	1668
+VLNP(R)	brain	http://virtualflybrain.org/reports/VFB_001011e2	10843
+VMNP	brain	http://virtualflybrain.org/reports/VFB_001011e3	4523
 WED(R)	brain	http://virtualflybrain.org/reports/VFB_00101419	2528
 a'1(R)	brain	http://virtualflybrain.org/reports/VFB_001011al	586
 a'2(R)	brain	http://virtualflybrain.org/reports/VFB_001011am	539
