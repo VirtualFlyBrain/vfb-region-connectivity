@@ -1,6 +1,8 @@
 # Per-dataset content summary: entity/edge counts and count-annotation totals.
+# Counts are xsd:float in the OWL; each is cast to integer before summing, as
+# summing floats loses precision at connectome scale.
 # Diffed between versions to spot large shifts (e.g. a dropped ROI mapping or a
-# neuprint re-export changing synapse totals).
+# source re-export changing synapse totals).
 PREFIX owl: <http://www.w3.org/2002/07/owl#>
 PREFIX obo: <http://purl.obolibrary.org/obo/>
 PREFIX custom: <http://n2o.neo/custom/>
@@ -13,7 +15,7 @@ WHERE {
     SELECT ("dataset" AS ?metric) (STR(?d) AS ?value)
     WHERE { ?ont a owl:Ontology ; dcterms:identifier ?d . }
   } UNION {
-    SELECT ("neuprint_source" AS ?metric) (STR(?s) AS ?value)
+    SELECT ("source" AS ?metric) (STR(?s) AS ?value)
     WHERE { ?ont a owl:Ontology ; dcterms:source ?s . }
   } UNION {
     SELECT ("version" AS ?metric) (STR(?v) AS ?value)
@@ -39,13 +41,13 @@ WHERE {
     SELECT ("presynaptic_edges" AS ?metric) (COUNT(*) AS ?value)
     WHERE { ?ax a owl:Axiom ; owl:annotatedProperty obo:RO_0002113 . }
   } UNION {
-    SELECT ("total_upstream" AS ?metric) (xsd:integer(SUM(?v)) AS ?value)
+    SELECT ("total_upstream" AS ?metric) (SUM(xsd:integer(?v)) AS ?value)
     WHERE { ?ax a owl:Axiom ; custom:upstream ?v . }
   } UNION {
-    SELECT ("total_Tbars" AS ?metric) (xsd:integer(SUM(?v)) AS ?value)
+    SELECT ("total_Tbars" AS ?metric) (SUM(xsd:integer(?v)) AS ?value)
     WHERE { ?ax a owl:Axiom ; custom:Tbars ?v . }
   } UNION {
-    SELECT ("total_downstream" AS ?metric) (xsd:integer(SUM(?v)) AS ?value)
+    SELECT ("total_downstream" AS ?metric) (SUM(xsd:integer(?v)) AS ?value)
     WHERE { ?ax a owl:Axiom ; custom:downstream ?v . }
   }
 }

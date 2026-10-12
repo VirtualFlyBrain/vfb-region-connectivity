@@ -7,10 +7,11 @@ representation already in VFB's production graph (pdb):
   * has presynaptic terminals in  (RO:0002113)  -> annotations: Tbars, downstream
   * has postsynaptic terminal in  (RO:0002110)  -> annotation:  upstream
 
-Counts come from the dataset's source (cfg["source"]): either neuprint
-(neuprint-python, for the dataset version matching the VFB Site node) or a flywire
-codex CSV. flywire has no T-bars, so its presynaptic edge carries `downstream`
-(output synapses) instead. The count annotations use the n2o `custom:` namespace
+Counts come from the dataset's source (cfg["source"]): neuprint
+(neuprint-python, for the dataset version matching the VFB Site node), the
+FlyWire 783 per-neuron neuropil counts (Zenodo), or BANC's per-neuropil
+connection counts parquet. flywire and banc have no T-bars, so their
+presynaptic edge carries `downstream` (output synapses) instead. The count annotations use the n2o `custom:` namespace
 so that `owl2neo4jcsv` turns each axiom into a Neo4j edge carrying the counts as
 edge properties (side-load into pdb via vfb-pipeline-dumps).
 
@@ -21,13 +22,14 @@ A second file, synapse_totals_<dataset>.owl, carries each neuron's whole-neuron
 synapse totals (total_upstream / total_downstream / total_Tbars) as annotation
 assertions on the neuron, which owl2neo4jcsv turns into node properties. These
 are the denominators for input-proportion connectivity weights. They cannot be
-summed from the region edges (unmapped ROIs are dropped, neuprint ROIs overlap,
-and flywire's region table is thresholded), and they cannot ride in the region
-file, which is side-loaded edge-only.
+summed from the region edges (unmapped ROIs are dropped and neuprint ROIs
+overlap), and they cannot ride in the region file, which is side-loaded
+edge-only.
 
-Datasets marked `totals_only` in dataset_config.yaml (BANC, CATMAID) produce only
-the totals file: banc from its per-neuropil connection counts parquet, catmaid
-from each skeleton's connectors on the VFB-hosted CATMAID server.
+Datasets marked `totals_only` in dataset_config.yaml (CATMAID) produce only the
+totals file, from each skeleton's connectors on the VFB-hosted CATMAID server.
+BANC's counts (totals and per region) come from its per-neuropil connection
+counts parquet.
 
 Usage:
     python3 make_region_connectivity.py <dataset_key> <neuprint_token_file> <out_dir> <report_dir>
@@ -35,7 +37,9 @@ Usage:
 import datetime
 import os
 import re
+import shutil
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -47,7 +51,7 @@ import yaml
 import neuprint
 from neuprint import NeuronCriteria as NC, fetch_neurons
 
-from cypher_query import query_neo4j, auth
+from cypher_query import query_neo4j, auth, _make_session
 
 # VFB Neo4j endpoints. pdb (production) holds released datasets + region
 # individuals; kb (knowledge base, source) holds datasets not yet in pdb.
@@ -81,6 +85,11 @@ EDGE_SPECS = {
     # -> upstream (postsynaptic edge), output synapses -> downstream (presynaptic
     # edge, gated on the output count).
     "flywire": (
+        (RO_POST, "upstream", "upstream", ()),
+        (RO_PRE, "downstream", "downstream", ()),
+    ),
+    # banc: likewise one synapse count per direction, no T-bars.
+    "banc": (
         (RO_POST, "upstream", "upstream", ()),
         (RO_PRE, "downstream", "downstream", ()),
     ),
@@ -209,59 +218,71 @@ def get_catmaid_server(site, url=KB):
     raise RuntimeError(f"Could not derive CATMAID server from Site {site}")
 
 
-def load_flywire_counts(csv_source, body_ids):
-    """Read the flywire neuropil_synapse_table (one row per root_id, wide
-    'input synapses in <R>' / 'output synapses in <R>' columns) and reshape to the
-    long [bodyId, roi, upstream, downstream] form build_axioms expects.
+def _local_copy(source, workdir):
+    """A local path for source: itself if it is one, else a download into
+    workdir. Downloads go through a session that retries 5xx responses, since
+    the Zenodo files intermittently 504; pandas' own URL reading does not
+    retry."""
+    if not re.match(r"https?://", source):
+        return source
+    path = os.path.join(workdir, os.path.basename(urlsplit(source).path))
+    # Zenodo times out about half of requests at its 30 s gateway, so allow
+    # more retries than the Neo4j queries need (backoff 2s, 4s, ... capped).
+    with _make_session(retries=10, backoff_factor=2) as session, \
+            session.get(source, stream=True, timeout=600) as r:
+        r.raise_for_status()
+        with open(path, "wb") as fh:
+            for chunk in r.iter_content(chunk_size=1 << 20):
+                fh.write(chunk)
+    return path
 
-    input synapses -> upstream (postsynaptic edge), output synapses -> downstream
-    (presynaptic edge). csv_source is a path or URL (gzip inferred). partners
-    columns are ignored."""
-    df = pd.read_csv(csv_source)
+
+# the per-neuron neuropil count files label synapses outside every neuropil
+# "None"; codex calls them UNASGD, which is kept so ROI reports stay comparable
+FLYWIRE_UNASSIGNED = {"None": "UNASGD"}
+
+
+def load_flywire_counts(post_source, pre_source, body_ids):
+    """(totals, counts) from the FlyWire per-neuron neuropil synapse counts
+    (feather; one row per neuron x neuropil, columns post_pt_root_id |
+    pre_pt_root_id, neuropil, count).
+
+    counts: [bodyId, roi, upstream, downstream], upstream from the post file
+    (synapses received in the neuropil), downstream from the pre file
+    (synapses made). totals: the same summed over neuropils; every synapse is
+    assigned to exactly one neuropil (or UNASGD), so that is the neuron total.
+    These count every synapse whatever the partner, unproofread fragments
+    included, with no connection-count threshold -- unlike codex's
+    neuropil_synapse_table, which only counts connections of >= 5 synapses."""
     ids = {int(b) for b in body_ids}
-    df = df[df["root_id"].isin(ids)]
-    pre = "input synapses in "
-    post = "output synapses in "
-    in_cols = {c: c[len(pre):] for c in df.columns if c.startswith(pre)}
-    out_cols = {c: c[len(post):] for c in df.columns if c.startswith(post)}
-    ins = df.melt(id_vars="root_id", value_vars=list(in_cols),
-                  var_name="roi", value_name="upstream")
-    ins["roi"] = ins["roi"].map(in_cols)
-    outs = df.melt(id_vars="root_id", value_vars=list(out_cols),
-                   var_name="roi", value_name="downstream")
-    outs["roi"] = outs["roi"].map(out_cols)
-    m = ins.merge(outs, on=["root_id", "roi"], how="outer").rename(columns={"root_id": "bodyId"})
-    # keep only (neuron, region) pairs with at least one synapse in either direction
-    m = m[(m["upstream"].fillna(0) > 0) | (m["downstream"].fillna(0) > 0)]
-    return m[["bodyId", "roi", "upstream", "downstream"]].reset_index(drop=True)
+    workdir = tempfile.mkdtemp(prefix="flywire_counts_")
 
-
-def load_flywire_totals(post_source, pre_source, body_ids):
-    """Whole-neuron [bodyId, upstream, downstream] totals from the FlyWire
-    per-neuron neuropil synapse counts (feather; one row per neuron x neuropil,
-    columns post_pt_root_id|pre_pt_root_id, neuropil, count).
-
-    upstream = synapses received (post file), downstream = synapses made (pre
-    file), each summed over neuropils. Every synapse is assigned to one
-    neuropil, so the sum is the neuron total. Unlike codex's tables these count
-    synapses with unproofread partners too, as neuprint's totals do."""
-    ids = {int(b) for b in body_ids}
-
-    def summed(source, id_col):
-        df = pd.read_feather(source, columns=[id_col, "count"])
+    def per_neuropil(source, id_col):
+        df = pd.read_feather(_local_copy(source, workdir), columns=[id_col, "neuropil", "count"])
         df = df[df[id_col].isin(ids)]
-        return df.groupby(id_col)["count"].sum()
+        df = df.assign(neuropil=df["neuropil"].replace(FLYWIRE_UNASSIGNED))
+        out = df.groupby([id_col, "neuropil"])["count"].sum()
+        out.index.names = ["bodyId", "roi"]
+        return out
 
-    totals = pd.DataFrame({"upstream": summed(post_source, "post_pt_root_id"),
-                           "downstream": summed(pre_source, "pre_pt_root_id")})
-    totals.index.name = "bodyId"
-    return totals.reset_index()
+    try:
+        counts = pd.DataFrame({"upstream": per_neuropil(post_source, "post_pt_root_id"),
+                               "downstream": per_neuropil(pre_source, "pre_pt_root_id")}
+                              ).reset_index()
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    totals = counts.groupby("bodyId", as_index=False)[["upstream", "downstream"]].sum(min_count=1)
+    return totals, counts
 
 
-def load_banc_totals(source, body_ids):
-    """Whole-neuron [bodyId, upstream, downstream] totals from BANC's
-    per-neuropil connection counts parquet (pre_root_id, post_root_id, neuropil,
-    num_synapses; ~177M rows, so read one row group at a time).
+def load_banc_counts(source, body_ids):
+    """(totals, counts) from BANC's per-neuropil connection counts parquet
+    (pre_root_id, post_root_id, neuropil, num_synapses; ~177M rows, so read one
+    row group at a time).
+
+    totals: whole-neuron [bodyId, upstream, downstream]. counts: per neuron and
+    BANC neuropil label [bodyId, neuropil, upstream, downstream]; see
+    banc_roi_name for turning the labels into VFB region names.
 
     This is the v1 synapse set (size > 3) with no connection-count threshold,
     i.e. the synapses VFB's BANC connectivity is built from before its
@@ -272,17 +293,66 @@ def load_banc_totals(source, body_ids):
     with fsspec.open(source, "rb") as fh:
         pf = pq.ParquetFile(fh)
         for i in range(pf.num_row_groups):
-            rg = pf.read_row_group(i, columns=["pre_root_id", "post_root_id", "num_synapses"]
-                                   ).to_pandas()
+            rg = pf.read_row_group(
+                i, columns=["pre_root_id", "post_root_id", "neuropil", "num_synapses"]).to_pandas()
             post = rg[rg["post_root_id"].isin(ids)]
-            ups.append(post.groupby("post_root_id")["num_synapses"].sum())
+            ups.append(post.groupby(["post_root_id", "neuropil"])["num_synapses"].sum())
             pre = rg[rg["pre_root_id"].isin(ids)]
-            downs.append(pre.groupby("pre_root_id")["num_synapses"].sum())
-    up = pd.concat(ups).groupby(level=0).sum() if ups else pd.Series(dtype="int64")
-    down = pd.concat(downs).groupby(level=0).sum() if downs else pd.Series(dtype="int64")
-    totals = pd.DataFrame({"upstream": up, "downstream": down})
-    totals.index.name = "bodyId"
-    return totals.reset_index()
+            downs.append(pre.groupby(["pre_root_id", "neuropil"])["num_synapses"].sum())
+
+    def merged(parts):
+        if not parts:
+            return pd.Series(dtype="int64")
+        out = pd.concat(parts).groupby(level=[0, 1]).sum()
+        out.index.names = ["bodyId", "neuropil"]
+        return out
+
+    counts = pd.DataFrame({"upstream": merged(ups), "downstream": merged(downs)}).reset_index()
+    totals = counts.groupby("bodyId", as_index=False)[["upstream", "downstream"]].sum(min_count=1)
+    return totals, counts
+
+
+# BANC v1 neuropil names -> VFB (Bates2026roi) region names. BANC built its v1
+# synapse neuropils from the Ito (brain) and Court (VNC) meshes of its
+# region_outlines layer, then renamed them into "{region}_{neuropil}_{side}"
+# labels (synapses/v1.1/finalize_neuropil_assignments.py in the BANC bucket);
+# this inverts those renamings. Court's mVAC was split into T1/T2/T3 by
+# position, so all three go back to mVAC; IntTct and LTct exist in both the
+# Court and MANC atlases in VFB, and these are the Court ones.
+BANC_NEUROPIL_RENAMES = {
+    "T1-ProNm": "ProNM-T1", "T2-MesoNm": "MesoNM-T2", "T3-MetaNm": "MetaNM-T3",
+    "ANm": "ABDNM", "AMNp": "AMNP",
+    "MB-CA": "MB_CA", "MB-ML": "MB_ML", "MB-VL": "MB_VL", "MB-PED": "MB_PED",
+    "T1-mVAC": "mVAC", "T2-mVAC": "mVAC", "T3-mVAC": "mVAC",
+    "IntTct": "IntTct (COURT)", "LTct": "LTct (COURT)",
+}
+
+
+def banc_roi_name(label, roi2region):
+    """VFB region name for a BANC v1 neuropil label like "CB_SLP_R" or
+    "VNC_T1-ProNm_L": the sided region (SLP_R) where VFB has one, else the
+    unsided one (ProNM-T1), so both sides' synapses land on it. None for the
+    unassigned labels and for anything VFB has no region for."""
+    _area, rest = label.split("_", 1)
+    neuropil, side = rest.rsplit("_", 1)
+    name = BANC_NEUROPIL_RENAMES.get(neuropil, neuropil)
+    for candidate in ("%s_%s" % (name, side), name):
+        if candidate in roi2region:
+            return candidate
+    return None
+
+
+def banc_region_counts(counts, roi2region):
+    """Per-neuron BANC counts keyed by VFB region name, summing labels that
+    resolve to the same region (both sides of an unsided region, mVAC's three
+    parts). Labels with no region keep their BANC name so the ROI report lists
+    them as unmapped. Also returns each name's brain/vnc group."""
+    names = {lab: banc_roi_name(lab, roi2region) or lab for lab in counts["neuropil"].unique()}
+    group = {names[lab]: ("vnc" if lab.startswith("VNC_") else "brain") for lab in names}
+    out = (counts.assign(roi=counts["neuropil"].map(names))
+           .groupby(["bodyId", "roi"], as_index=False)[["upstream", "downstream"]]
+           .sum(min_count=1))
+    return out, group
 
 
 def _catmaid_connector_counts(session, base, pid, skid):
@@ -336,30 +406,50 @@ def get_bodyid_to_neuron(site, url=KB):
 
 
 def get_roi_to_region(roi_dataset, url=KB):
-    """neuprint ROI name -> VFB region-individual IRI.
+    """Source ROI name -> VFB region-individual IRI.
 
-    The ROI name is the region label with the ' on <template>' suffix stripped,
-    which equals the neuprint ROI name.
+    A region answers to its label-derived name (see _roi_from_label) and to its
+    synonyms: newer ROI datasets record the exact source ROI name as a synonym
+    (`synonyms`; hemibrain's use `has_exact_synonym`), which also covers labels
+    that differ from it (BANC "LTct (COURT)" has synonym "LTct"). A name that
+    resolves to more than one region is ambiguous and dropped, with a warning.
     """
     df = query_neo4j(
         "MATCH (reg)-[:has_source]->(:DataSet {short_form:\"%s\"}) "
-        "RETURN reg.iri AS iri, reg.label AS label" % roi_dataset,
+        "RETURN reg.iri AS iri, reg.label AS label, "
+        "coalesce(reg.synonyms, reg.has_exact_synonym, []) AS syn" % roi_dataset,
         url=url,
     )
-    return {_roi_from_label(row["label"]): row["iri"] for _, row in df.iterrows()}
+    return _roi_names_to_regions(zip(df["iri"], df["label"], df["syn"]))
+
+
+def _roi_names_to_regions(regions):
+    """{name: iri} from (iri, label, synonyms) triples; see get_roi_to_region."""
+    names = {}
+    for iri, label, syns in regions:
+        candidates = {_roi_from_label(label)}
+        candidates.update(s.replace("\\", "") for s in (syns or []))
+        for name in candidates:
+            names.setdefault(name, set()).add(iri)
+    ambiguous = sorted(n for n, iris in names.items() if len(iris) > 1)
+    if ambiguous:
+        print("WARNING: ROI names matching several regions, dropped:", ", ".join(ambiguous))
+    return {n: next(iter(iris)) for n, iris in names.items() if len(iris) == 1}
 
 
 def _roi_from_label(label):
-    """VFB region label -> neuprint ROI name.
+    """VFB region label -> source ROI name.
 
-    Strips the ' on <template>' suffix, and removes literal backslashes: some
-    VFB labels store an escaped apostrophe (e.g. "a\\'L(R)") while neuprint ROI
-    names use a plain apostrophe, so MB alpha'/beta' lobe ROIs would otherwise
-    fail to map and be dropped.
+    Strips the ' on <template>' suffix and any '<Dataset>:' prefix (newer ROI
+    datasets label regions e.g. "MANC:LegNp(T3)(R) on JRC2018UnisexVNC"), and
+    removes literal backslashes: some VFB labels store an escaped apostrophe
+    (e.g. "a\\'L(R)") while neuprint ROI names use a plain apostrophe, so MB
+    alpha'/beta' lobe ROIs would otherwise fail to map and be dropped.
     """
     if isinstance(label, list):
         label = label[0]
-    return label.split(" on ")[0].replace("\\", "")
+    name = label.split(" on ")[0].replace("\\", "")
+    return re.sub(r"^[A-Za-z0-9]+:", "", name)
 
 
 NEUPRINT_TOTAL_COLS = ["bodyId", "pre", "post", "downstream", "upstream"]
@@ -573,11 +663,11 @@ def write_roi_report(path, counts, roi2region, roi_group=None):
 
 def report_totals(totals, counts, roi2region):
     """Print how the whole-neuron input totals compare with the summed mapped
-    region input counts. The two are not expected to agree: mapped ROIs can
-    overlap (hemibrain maps super-ROIs and their parts), which inflates the
-    region sum, and flywire's region table only counts connections of >= 5
-    synapses, which deflates it. A large unexplained shift between builds is
-    the thing to look for."""
+    region input counts. Where the mapped regions partition the neuron
+    (flywire, banc) the region sum can only be smaller, by the synapses in
+    unmapped regions; where they overlap (hemibrain and male-cns map super-ROIs
+    as well as their parts) it can be larger. A large unexplained shift between
+    builds is the thing to look for."""
     if totals.empty:
         print("WARNING: no whole-neuron totals fetched")
         return
@@ -626,14 +716,15 @@ def main():
     elif source == "flywire":
         source_id = get_flywire_provenance(cfg["site"], url)
         print("flywire source:", source_id)
-        counts = load_flywire_counts(cfg["csv_url"], bodyid2neuron.keys())
-        totals = load_flywire_totals(cfg["totals_post_url"], cfg["totals_pre_url"],
-                                     bodyid2neuron.keys())
+        totals, counts = load_flywire_counts(cfg["counts_post_url"], cfg["counts_pre_url"],
+                                             bodyid2neuron.keys())
         roi_group = {r: "brain" for r in roi2region}  # FAFB is brain-only (no VNC)
-    elif source == "banc" and totals_only:
+    elif source == "banc":
         source_id = get_flywire_provenance(cfg["site"], url, name="banc")
         print("banc source:", source_id)
-        totals = load_banc_totals(cfg["totals_parquet_url"], bodyid2neuron.keys())
+        totals, banc_counts = load_banc_counts(cfg["counts_parquet_url"], bodyid2neuron.keys())
+        if not totals_only:
+            counts, roi_group = banc_region_counts(banc_counts, roi2region)
     elif source == "catmaid" and totals_only:
         base, pid = get_catmaid_server(cfg["site"], url)
         # a live server has no version: the build date stands in for one
@@ -641,7 +732,7 @@ def main():
         print("catmaid source:", base, "pid", pid, "->", source_id)
         totals = load_catmaid_totals(base, pid, bodyid2neuron.keys())
     else:
-        sys.exit("unsupported source %r for dataset %s (banc/catmaid need totals_only)"
+        sys.exit("unsupported source %r for dataset %s (catmaid needs totals_only)"
                  % (source, dataset_key))
 
     qc_dir = os.path.join(out_dir, "qc")

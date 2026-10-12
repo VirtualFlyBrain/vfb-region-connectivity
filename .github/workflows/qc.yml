@@ -9,11 +9,11 @@ on:
 
 jobs:
   # Unit tests + offline pipeline tests: run the real transform on SAVED
-  # neuprint/kb samples (src/scripts/test_data/) for hemibrain and male-cns,
-  # ROBOT-convert, and run the SPARQL shape checks. No live queries. Full-file
-  # verify is intentionally not run in CI — it doesn't fit in a runner's memory
-  # at connectome scale, and the sample checks + build-time construction cover
-  # validation.
+  # neuprint/kb samples (src/scripts/test_data/) and stubbed flywire/banc/
+  # catmaid sources, ROBOT-convert, and run the SPARQL shape checks. No live
+  # queries. The committed artifacts are not rebuilt or verified here — that
+  # needs the live sources and doesn't fit in a runner's memory; each build
+  # shape-checks a sample of its own output instead.
   tests:
     runs-on: ubuntu-latest
     container: obolibrary/odkfull:latest

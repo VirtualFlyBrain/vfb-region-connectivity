@@ -1,0 +1,9 @@
+?metric	?value
+"dataset"	"catmaid-fafb"
+"neurons"	5062
+"neurons_with_total_upstream"	4875
+"source"	"catmaid_fafb:2026-10-12"
+"total_Tbars"	523885
+"total_downstream"	0
+"total_upstream"	780916
+"version"	"2026-10-12"

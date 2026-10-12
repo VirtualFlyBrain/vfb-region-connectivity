@@ -1,0 +1,11 @@
+?metric	?value
+"dataset"	"manc"
+"neurons"	23650
+"postsynaptic_edges"	92993
+"presynaptic_edges"	77545
+"regions"	57
+"source"	"manc:v1.2.1"
+"total_Tbars"	9283322
+"total_downstream"	66003120
+"total_upstream"	33689389
+"version"	"v1.2.1"

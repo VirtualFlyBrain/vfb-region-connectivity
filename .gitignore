@@ -40,6 +40,7 @@ src/ontology/reports/*/*
 !src/ontology/reports/*/terms.txt
 !src/ontology/reports/*/summary.tsv
 !src/ontology/reports/*/roi_mapping.tsv
+!src/ontology/reports/*/totals_summary.tsv
 src/ontology/VFB_region_connectivity.owl
 src/ontology/VFB_region_connectivity.obo
 src/ontology/VFB_region_connectivity.json

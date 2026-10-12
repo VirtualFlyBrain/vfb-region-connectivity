@@ -1,0 +1,9 @@
+?metric	?value
+"dataset"	"catmaid-l1em"
+"neurons"	4200
+"neurons_with_total_upstream"	4127
+"source"	"catmaid_l1em:2026-10-12"
+"total_Tbars"	217924
+"total_downstream"	0
+"total_upstream"	550929
+"version"	"2026-10-12"

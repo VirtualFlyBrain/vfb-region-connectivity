@@ -1,0 +1,11 @@
+?metric	?value
+"dataset"	"banc"
+"neurons"	145006
+"postsynaptic_edges"	414059
+"presynaptic_edges"	400506
+"regions"	86
+"source"	"banc:888"
+"total_Tbars"	0
+"total_downstream"	155558058
+"total_upstream"	51758503
+"version"	"888"

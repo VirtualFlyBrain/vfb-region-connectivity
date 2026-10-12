@@ -1,11 +1,12 @@
 ## Customize Makefile settings for VFB_region_connectivity
 ##
-## This repo does not build a single merged ontology. Instead it produces one
-## side-load OWL file per connectomics dataset:
+## This repo does not build a single merged ontology. Instead it produces, per
+## connectomics dataset (dataset_config.yaml), up to two OWL files:
 ##
 ##     region_connectivity_<dataset>.owl   (written to the repo root)
+##     synapse_totals_<dataset>.owl
 ##
-## Each file holds every neuron's per-neuropil-region synaptic tallies as
+## Each region file holds every neuron's per-neuropil-region synaptic tallies as
 ## axiom-annotated RO:0002110 / RO:0002113 relations (counts in the n2o
 ## `custom:` namespace), matching the representation in VFB's pdb. The files are
 ## side-loaded by vfb-pipeline-dumps (edge-only) and never merged/reasoned, so
@@ -15,14 +16,17 @@
 ## whole-neuron synapse totals as node annotations. Those must reach pdb as node
 ## properties, which an edge-only side-load drops, so that file is loaded into
 ## the main graph instead (vfb-pipeline-collectdata vfb_fullontologies.txt).
+## Datasets marked totals_only (CATMAID) produce only the totals file.
 ##
 ## Build everything:   sh run.sh make region_connectivity
 ## Build one dataset:  sh run.sh make ../../region_connectivity_hemibrain.owl
+## Totals-only one:    sh run.sh make ../../synapse_totals_catmaid-l1em.owl
 
 # Build the side-load files by default (this repo has no ODK -edit ontology).
 .DEFAULT_GOAL := region_connectivity
 
-# Path to a neuprint token (single line). See https://neuprint.janelia.org (Account).
+# Path to a neuprint token (single line), needed by the neuprint datasets.
+# See https://neuprint.janelia.org (Account).
 NEUPRINT_TOKEN_FILE = ../../neuprint_token.txt
 
 # Datasets to build. Single source of truth is dataset_config.yaml (also read by
@@ -45,9 +49,9 @@ RC_QUERIES = $(foreach V,post-edge-missing-upstream pre-edge-missing-count \
 
 ######################### Environment #########################
 
-# Python venv for the neuprint pull. Sentinel rebuilds only when requirements
+# Python venv for the source pulls. Sentinel rebuilds only when requirements
 # change; it is an ORDER-ONLY prereq of the OWL so building reports never
-# triggers a (slow) neuprint re-pull.
+# triggers a (slow) re-pull from the sources.
 my-venv/.installed: $(SCRIPTSDIR)/requirements.txt
 	python3 -m venv my-venv
 	my-venv/bin/pip install -q -r $(SCRIPTSDIR)/requirements.txt
@@ -63,14 +67,14 @@ get_query_script:
 .PHONY: region_connectivity
 region_connectivity: $(REGION_FILES) $(TOTALS_FILES)
 
-# Force a fresh pull from neuprint (data is only rebuilt on demand / when absent).
+# Force a fresh pull from the sources (data is only rebuilt on demand / when absent).
 .PHONY: refresh
 refresh:
 	rm -f $(REGION_FILES) $(RELEASEDIR)/region_connectivity_*.owl.gz
 	rm -f $(TOTALS_FILES) $(RELEASEDIR)/synapse_totals_*.owl.gz
 	$(MAKE) region_connectivity
 
-# Build one dataset: pull from neuprint, emit functional-syntax OWL (one file per
+# Build one dataset: pull from its source, emit functional-syntax OWL (one file per
 # dataset) plus a small QC sample, convert to RDF/XML + gzip, and run the shape
 # checks on the QC sample (the full file is too large for robot verify). The plain
 # .owl is the side-load; the .owl.gz is committed. Rebuilt only when the .owl is
@@ -96,7 +100,8 @@ $(TOTALS_ONLY_FILES): $(RELEASEDIR)/synapse_totals_%.owl: | my-venv/.installed $
 
 ######################### Reports #########################
 ## sh run.sh make region_connectivity_reports
-##   -> per-dataset + merged term lists, per-dataset content summaries.
+##   -> per-dataset + merged term lists, per-dataset content summaries of the
+##   region files, and a per-dataset summary of each synapse_totals file.
 ##   (shape checks run at build time on a QC sample; the roi_mapping report is
 ##   written cheaply during the build.)
 
@@ -104,6 +109,7 @@ $(TOTALS_ONLY_FILES): $(RELEASEDIR)/synapse_totals_%.owl: | my-venv/.installed $
 # build. reports/<dataset>/{terms.txt,summary.tsv}; merged term list at root.
 DATASET_TERMS = $(patsubst %, $(REPORTDIR)/%/terms.txt, $(REGION_DATASETS))
 DATASET_SUMMARIES = $(patsubst %, $(REPORTDIR)/%/summary.tsv, $(REGION_DATASETS))
+TOTALS_SUMMARIES = $(patsubst %, $(REPORTDIR)/%/totals_summary.tsv, $(DATASETS))
 
 $(REPORTDIR)/%/terms.txt: $(RELEASEDIR)/region_connectivity_%.owl | $(REPORTDIR)
 	mkdir -p $(REPORTDIR)/$*
@@ -124,9 +130,13 @@ $(REPORTDIR)/%/summary.tsv: $(RELEASEDIR)/region_connectivity_%.owl | $(REPORTDI
 # file in src/scripts/test_make_region_connectivity.py, and the invariants are
 # guaranteed by construction in build_axioms.
 
+$(REPORTDIR)/%/totals_summary.tsv: $(RELEASEDIR)/synapse_totals_%.owl | $(REPORTDIR)
+	mkdir -p $(REPORTDIR)/$*
+	$(ROBOT) query -f tsv -i $< --query $(SPARQLDIR)/synapse_totals_summary.sparql $@
+
 .PHONY: region_connectivity_reports
 region_connectivity_reports: $(DATASET_TERMS) $(REPORTDIR)/region_connectivity-terms.txt \
-	$(DATASET_SUMMARIES)
+	$(DATASET_SUMMARIES) $(TOTALS_SUMMARIES)
 
 # --- optional standard ROBOT report (missing_label rows filtered out: side-load
 #     edge files intentionally carry no labels for external terms).

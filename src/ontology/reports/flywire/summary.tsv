@@ -1,0 +1,11 @@
+?metric	?value
+"dataset"	"flywire"
+"neurons"	138974
+"postsynaptic_edges"	419130
+"presynaptic_edges"	392255
+"regions"	78
+"source"	"flywire:783"
+"total_Tbars"	0
+"total_downstream"	121904312
+"total_upstream"	58096025
+"version"	"783"

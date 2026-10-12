@@ -103,6 +103,24 @@ def test_roi_from_label_handles_list():
     assert m._roi_from_label(["LH(R) on X"]) == "LH(R)"
 
 
+def test_roi_from_label_strips_dataset_prefix():
+    assert m._roi_from_label("MANC:LegNp(T3)(R) on JRC2018UnisexVNC") == "LegNp(T3)(R)"
+    assert m._roi_from_label("FlyWire:CAN_L on JRC2018Unisex") == "CAN_L"
+
+
+def test_roi_names_to_regions_uses_synonyms_and_drops_ambiguous(capsys):
+    got = m._roi_names_to_regions([
+        ("http://vfb/ltct", "BANC:LTct (COURT) on JRC2018UnisexVNC", ["LTct"]),  # label != ROI name
+        ("http://vfb/sip", "SIP(R) on JRC_FlyEM_Hemibrain", None),                 # label only
+        ("http://vfb/e1", "L-EPA on X", ["shared"]),                               # same synonym
+        ("http://vfb/e2", "R-EPA on X", ["shared"]),                               # on two regions
+    ])
+    assert got["LTct"] == got["LTct (COURT)"] == "http://vfb/ltct"
+    assert got["SIP(R)"] == "http://vfb/sip"
+    assert "shared" not in got and "shared" in capsys.readouterr().out   # dropped, warned
+    assert got["L-EPA"] == "http://vfb/e1"
+
+
 # --- edge counts (primary gates the edge) ----------------------------------
 POST, PRE = m.EDGE_SPECS["neuprint"]
 FW_POST, FW_PRE = m.EDGE_SPECS["flywire"]
@@ -188,33 +206,95 @@ def test_build_axioms_flywire_uses_downstream_no_tbars():
     assert pre_axioms and all("custom/downstream" in a for a in pre_axioms)
 
 
-def test_load_flywire_totals_sums_over_neuropils(tmp_path):
+def test_local_copy_passes_paths_through_and_downloads_urls(tmp_path, monkeypatch):
+    assert m._local_copy("/some/file.feather", str(tmp_path)) == "/some/file.feather"
+
+    class _Resp:
+        def iter_content(self, chunk_size=None): return iter([b"da", b"ta"])
+        def raise_for_status(self): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    class _Session:
+        def get(self, url, stream=None, timeout=None): return _Resp()
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+    monkeypatch.setattr(m, "_make_session", lambda **kw: _Session())
+    path = m._local_copy("https://zenodo.org/records/1/files/x.feather", str(tmp_path))
+    assert path == str(tmp_path / "x.feather") and open(path, "rb").read() == b"data"
+
+
+def test_load_flywire_counts_per_region_and_totals(tmp_path):
     post, pre = tmp_path / "post.feather", tmp_path / "pre.feather"
-    pd.DataFrame({"post_pt_root_id": [1, 1, 2, 3],
-                  "neuropil": ["ME_L", "LO_L", "EB", "EB"],
-                  "count": [1, 4, 6, 9]}).to_feather(post)
+    pd.DataFrame({"post_pt_root_id": [1, 1, 1, 2, 3],
+                  "neuropil": ["ME_L", "LO_L", "None", "EB", "EB"],
+                  "count": [1, 4, 2, 6, 9]}).to_feather(post)
     pd.DataFrame({"pre_pt_root_id": [1, 2],          # 2 has outputs, 3 none listed
                   "neuropil": ["ME_L", "EB"],
                   "count": [3, 2]}).to_feather(pre)
-    df = m.load_flywire_totals(str(post), str(pre), body_ids=[1, 2]).set_index("bodyId")
-    assert df.loc[1, "upstream"] == 5 and df.loc[1, "downstream"] == 3
-    assert df.loc[2, "upstream"] == 6 and df.loc[2, "downstream"] == 2
-    assert 3 not in df.index                          # not requested
+    totals, counts = m.load_flywire_counts(str(post), str(pre), body_ids=[1, 2])
+    totals = totals.set_index("bodyId")
+    assert totals.loc[1, "upstream"] == 7 and totals.loc[1, "downstream"] == 3   # incl. unassigned
+    assert totals.loc[2, "upstream"] == 6 and totals.loc[2, "downstream"] == 2
+    assert 3 not in totals.index                      # not requested
+    c = counts.set_index(["bodyId", "roi"])
+    assert c.loc[(1, "ME_L"), "upstream"] == 1 and c.loc[(1, "ME_L"), "downstream"] == 3
+    assert c.loc[(1, "UNASGD"), "upstream"] == 2      # "None" relabelled as codex's UNASGD
 
-
-def test_load_banc_totals_sums_over_row_groups(tmp_path):
+def test_load_banc_counts_sums_over_row_groups(tmp_path):
     import pyarrow as pa
     import pyarrow.parquet as pq
     pqf = tmp_path / "banc.parquet"
     tbl = pa.table({"pre_root_id": [0, 1, 1, 2, 3],      # 0 = unsegmented partner
                     "post_root_id": [1, 2, 2, 1, 1],
-                    "neuropil": ["CB_AL_L", "CB_AL_L", "CB_SLP_R", "VNC_x", "CB_AL_L"],
+                    "neuropil": ["CB_AL_L", "CB_AL_L", "CB_SLP_R", "VNC_ANm_L", "CB_AL_L"],
                     "num_synapses": [1, 2, 3, 4, 5]})
     pq.write_table(tbl, pqf, row_group_size=2)            # 3 row groups to merge
-    df = m.load_banc_totals(str(pqf), body_ids=[1, 2]).set_index("bodyId")
-    assert df.loc[1, "upstream"] == 1 + 4 + 5 and df.loc[1, "downstream"] == 5
-    assert df.loc[2, "upstream"] == 5 and df.loc[2, "downstream"] == 4
-    assert 3 not in df.index
+    totals, counts = m.load_banc_counts(str(pqf), body_ids=[1, 2])
+    totals = totals.set_index("bodyId")
+    assert totals.loc[1, "upstream"] == 1 + 4 + 5 and totals.loc[1, "downstream"] == 5
+    assert totals.loc[2, "upstream"] == 5 and totals.loc[2, "downstream"] == 4
+    assert 3 not in totals.index
+    c = counts.set_index(["bodyId", "neuropil"])
+    assert c.loc[(1, "CB_AL_L"), "upstream"] == 6          # row groups merged
+    assert c.loc[(1, "CB_AL_L"), "downstream"] == 2
+
+
+_BANC_REGIONS = {n: "http://vfb/" + n for n in [
+    "SLP_R", "SLP_L", "MB_CA_L", "GNG", "ProNM-T1", "ABDNM", "AMNP", "mVAC",
+    "IntTct (COURT)", "IntTct (MANC)", "HTct", "AMNp_L", "ANm", "LNp_T1_L"]}
+
+
+@pytest.mark.parametrize("label,roi", [
+    ("CB_SLP_R", "SLP_R"),                      # sided brain region
+    ("CB_MB-CA_L", "MB_CA_L"),                  # dash renamed back
+    ("CB_GNG_L", "GNG"), ("CB_GNG_R", "GNG"),   # unsided: both sides land on it
+    ("VNC_T1-ProNm_L", "ProNM-T1"),             # Court neuromere, not MANC LNp_T1_L
+    ("VNC_ANm_R", "ABDNM"),                     # BANC's ANm is Court ABDNM, not MANC ANm
+    ("VNC_AMNp_L", "AMNP"),                     # ... and AMNp is Court AMNP, not MANC AMNp_L
+    ("VNC_T2-mVAC_R", "mVAC"),                  # position-split mVAC goes back to mVAC
+    ("VNC_IntTct_L", "IntTct (COURT)"),         # Court, not MANC, version
+    ("VNC_HTct_R", "HTct"),
+    ("brain_unassigned_L", None), ("VNC_unassigned_R", None),
+    ("OL_LO_R", None),                          # no such region in this stub
+])
+def test_banc_roi_name(label, roi):
+    assert m.banc_roi_name(label, _BANC_REGIONS) == roi
+
+
+def test_banc_region_counts_sums_and_keeps_unmapped_labels():
+    counts = pd.DataFrame([
+        {"bodyId": 1, "neuropil": "CB_GNG_L", "upstream": 2, "downstream": 1},
+        {"bodyId": 1, "neuropil": "CB_GNG_R", "upstream": 3, "downstream": None},
+        {"bodyId": 1, "neuropil": "VNC_T1-mVAC_L", "upstream": 4, "downstream": 0},
+        {"bodyId": 1, "neuropil": "brain_unassigned_L", "upstream": 9, "downstream": 9},
+    ])
+    out, group = m.banc_region_counts(counts, _BANC_REGIONS)
+    rows = out.set_index("roi")
+    assert rows.loc["GNG", "upstream"] == 5 and rows.loc["GNG", "downstream"] == 1
+    assert rows.loc["mVAC", "upstream"] == 4
+    assert "brain_unassigned_L" in rows.index               # reported as unmapped
+    assert group["GNG"] == "brain" and group["mVAC"] == "vnc"
 
 
 def test_load_catmaid_totals_counts_links_and_skips_failures(monkeypatch):
@@ -250,23 +330,6 @@ def test_get_catmaid_server_from_site_link(monkeypatch):
     assert m.get_catmaid_server("catmaid_l1em") == ("https://l1em.catmaid.virtualflybrain.org", 1)
 
 
-def test_load_flywire_counts_reshapes_wide_table(tmp_path):
-    csv = tmp_path / "syn.csv"
-    csv.write_text(
-        "root_id,input synapses,output synapses,"
-        "input synapses in ME_L,output synapses in ME_L,"
-        "input synapses in EB,output synapses in EB,"
-        "input partners in ME_L,output partners in ME_L\n"
-        "1,16,5,12,0,4,5,3,0\n"        # ME_L post-only, EB pre-only
-        "2,0,0,0,0,0,0,0,0\n"          # neuron with no synapses -> no rows
-        "3,1,1,0,0,0,0,0,0\n")         # root_id 3 not requested -> excluded
-    df = m.load_flywire_counts(str(csv), body_ids=[1, 2])
-    rows = {(int(r.bodyId), r.roi): (r.upstream, r.downstream) for r in df.itertuples()}
-    assert rows == {(1, "ME_L"): (12, 0), (1, "EB"): (4, 5)}   # partners ignored
-    assert 3 not in {b for b, _ in rows}
-
-
-# --- whole-neuron synapse totals --------------------------------------------
 def test_build_total_axioms_neuprint():
     totals = pd.DataFrame([
         {"bodyId": 1, "pre": 3, "post": 40, "upstream": 40, "downstream": 12},
@@ -400,9 +463,8 @@ def _flywire(monkeypatch, tmp_path):
     monkeypatch.setattr(m, "get_flywire_provenance", lambda site, url=None: "flywire:783")
     monkeypatch.setattr(m, "get_bodyid_to_neuron", lambda site, url=None: b2n)
     monkeypatch.setattr(m, "get_roi_to_region", lambda ds, url=None: r2r)
-    monkeypatch.setattr(m, "load_flywire_counts", lambda src, ids: _fw_counts())
-    monkeypatch.setattr(m, "load_flywire_totals", lambda post, pre, ids: pd.DataFrame(
-        [{"bodyId": 1, "upstream": 30, "downstream": 20}]))
+    monkeypatch.setattr(m, "load_flywire_counts", lambda post, pre, ids: (
+        pd.DataFrame([{"bodyId": 1, "upstream": 30, "downstream": 20}]), _fw_counts()))
     token = tmp_path / "token.txt"; token.write_text("dummy")
     out_dir = tmp_path / "out"; out_dir.mkdir()
     report_dir = tmp_path / "report"

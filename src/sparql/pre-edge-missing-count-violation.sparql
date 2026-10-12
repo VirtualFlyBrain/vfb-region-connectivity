@@ -1,6 +1,6 @@
 # VIOLATION: a 'has presynaptic terminals in' (RO:0002113) edge carrying no
 # presynaptic count annotation. The presynaptic count is 'Tbars' for neuprint
-# datasets and 'downstream' for flywire (which has no T-bars), so an edge must
+# datasets and 'downstream' for flywire and banc (no T-bars), so an edge must
 # have at least one of them. Every edge is a direct ObjectPropertyAssertion, so
 # the relation is the reified axiom's annotatedProperty.
 PREFIX owl: <http://www.w3.org/2002/07/owl#>

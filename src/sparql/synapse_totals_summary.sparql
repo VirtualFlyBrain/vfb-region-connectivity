@@ -1,0 +1,40 @@
+# Per-dataset content summary of a synapse_totals_<dataset>.owl file: how many
+# neurons carry totals, and the summed totals. Diffed between versions to spot
+# large shifts (e.g. a changed source, or neurons dropped from the Site).
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX custom: <http://n2o.neo/custom/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX dcterms: <http://purl.org/dc/terms/>
+
+SELECT ?metric ?value
+WHERE {
+  {
+    SELECT ("dataset" AS ?metric) (STR(?d) AS ?value)
+    WHERE { ?ont a owl:Ontology ; dcterms:identifier ?d . }
+  } UNION {
+    SELECT ("source" AS ?metric) (STR(?s) AS ?value)
+    WHERE { ?ont a owl:Ontology ; dcterms:source ?s . }
+  } UNION {
+    SELECT ("version" AS ?metric) (STR(?v) AS ?value)
+    WHERE { ?ont a owl:Ontology ; owl:versionInfo ?v . }
+  } UNION {
+    SELECT ("neurons" AS ?metric) (COUNT(DISTINCT ?n) AS ?value)
+    WHERE {
+      ?n ?p ?v .
+      FILTER(?p IN (custom:total_upstream, custom:total_downstream, custom:total_Tbars))
+    }
+  } UNION {
+    SELECT ("neurons_with_total_upstream" AS ?metric) (COUNT(DISTINCT ?n) AS ?value)
+    WHERE { ?n custom:total_upstream ?v . }
+  } UNION {
+    SELECT ("total_upstream" AS ?metric) (xsd:integer(SUM(?v)) AS ?value)
+    WHERE { ?n custom:total_upstream ?v . }
+  } UNION {
+    SELECT ("total_downstream" AS ?metric) (xsd:integer(SUM(?v)) AS ?value)
+    WHERE { ?n custom:total_downstream ?v . }
+  } UNION {
+    SELECT ("total_Tbars" AS ?metric) (xsd:integer(SUM(?v)) AS ?value)
+    WHERE { ?n custom:total_Tbars ?v . }
+  }
+}
+ORDER BY ?metric

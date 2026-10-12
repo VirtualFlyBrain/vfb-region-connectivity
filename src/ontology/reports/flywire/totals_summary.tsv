@@ -1,0 +1,9 @@
+?metric	?value
+"dataset"	"flywire"
+"neurons"	138975
+"neurons_with_total_upstream"	138386
+"source"	"flywire:783"
+"total_Tbars"	0
+"total_downstream"	121914213
+"total_upstream"	58101724
+"version"	"783"
