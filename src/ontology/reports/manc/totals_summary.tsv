@@ -1,0 +1,9 @@
+?metric	?value
+"dataset"	"manc"
+"neurons"	23665
+"neurons_with_total_upstream"	23663
+"source"	"manc:v1.2.1"
+"total_Tbars"	9301203
+"total_downstream"	66083561
+"total_upstream"	33724486
+"version"	"v1.2.1"

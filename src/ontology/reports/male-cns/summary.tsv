@@ -1,0 +1,11 @@
+?metric	?value
+"dataset"	"male-cns"
+"neurons"	166576
+"postsynaptic_edges"	1685500
+"presynaptic_edges"	1351839
+"regions"	397
+"source"	"male-cns:v1.0"
+"total_Tbars"	116471512
+"total_downstream"	809722953
+"total_upstream"	360724740
+"version"	"v1.0"

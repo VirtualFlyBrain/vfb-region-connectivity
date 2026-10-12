@@ -1,0 +1,9 @@
+?metric	?value
+"dataset"	"banc"
+"neurons"	145736
+"neurons_with_total_upstream"	145583
+"source"	"banc:888"
+"total_Tbars"	0
+"total_downstream"	158007911
+"total_upstream"	52877619
+"version"	"888"

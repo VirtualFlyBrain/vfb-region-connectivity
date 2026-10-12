@@ -1,32 +1,42 @@
-# Sparql checks
+# SPARQL queries
 
-[SPARQL](https://www.w3.org/TR/rdf-sparql-query/) is a W3C standard
-query language for RDF. This directory contains useful SPARQL queries
-for perfoming over the ontology.
+The queries here run with [`robot`](http://robot.obolibrary.org) over the
+generated files (`region_connectivity_<dataset>.owl`,
+`synapse_totals_<dataset>.owl`), not over an edited ontology — this repository
+has none. They fall into two groups.
 
-SPARQL can be executed on a triplestore or directly on any OWL
-file. The queries here are all executed on either VFB_region_connectivity-edit.obo or
-downstream products in the [ontology](../ontology/) folder. We use
-`robot` as this allows easy execution over any Obo-format or OWL file.
+## Shape checks (`*-violation.sparql`)
 
-We break the queries into 3 categories:
+Each returns the rows that break the expected shape of a generated file; any row
+fails the check. The build runs them on a sample of every file it writes
+(`VFB_region_connectivity.Makefile`), and the test suite runs them on samples
+and on deliberately malformed inputs (`src/scripts/test_make_region_connectivity.py`).
 
-## Constraint Violation checks
+| Query | Applies to | Rejects |
+|---|---|---|
+| `post-edge-missing-upstream` | region files | a `RO:0002110` edge with no `upstream` |
+| `pre-edge-missing-count` | region files | a `RO:0002113` edge with neither `Tbars` nor `downstream` |
+| `nonpositive-count` | region files | a count <= 0 |
+| `unexpected-connectivity-relation` | region files | counts on any relation other than `RO:0002110` / `RO:0002113` (incl. class-form axioms) |
+| `unexpected-count-annotation` | region files | any count annotation other than `upstream` / `Tbars` / `downstream` |
+| `nonvfb-neuron` | region files | an edge whose source is not a VFB individual |
+| `nonvfb-region` | region files | an edge whose target is not a VFB individual |
+| `synapse-total-violation` | totals files | a non-positive or unexpected `custom:` total, or one not on a VFB individual |
 
-These are all named `*violation.sparql`. A subset of these are
-configured to be executed via travis. If these return any results,
-then the build will fail.
+## Not used
 
-Consult the individual sparql files to see the intent of the check
-
-## Construct queries
-
-These are named `construct*.sparql`, and always have the form `CONSTRUCT ...`.
-
-These are used to generate new OWL axioms that can be inserted back
-into the ontology.
+The other queries here (the remaining `*-violation.sparql` files,
+`VFB_region_connectivity_terms.sparql`, `basic-report`, `edges`, `terms`,
+`synonyms`, `*.ru`, …) are ODK scaffolding for edited ontologies and are not run
+by this repository's build.
 
 ## Reports
 
-The remaining SPARQL queries are for informative purposes. A subset
-may be executed with each release.
+Run by `make region_connectivity_reports`; outputs go to
+`src/ontology/reports/<dataset>/` and are committed so versions can be diffed.
+
+| Query | Output |
+|---|---|
+| `region_connectivity_terms.sparql` | `terms.txt` — neurons and regions in the region file |
+| `region_connectivity_summary.sparql` | `summary.tsv` — header provenance, entity/edge counts and count totals of the region file |
+| `synapse_totals_summary.sparql` | `totals_summary.tsv` — header provenance, neurons with totals and the summed totals |

@@ -1,0 +1,11 @@
+?metric	?value
+"dataset"	"optic-lobe"
+"neurons"	53409
+"postsynaptic_edges"	543725
+"presynaptic_edges"	417983
+"regions"	103
+"source"	"optic-lobe:v1.0.1"
+"total_Tbars"	21934554
+"total_downstream"	151421810
+"total_upstream"	83536394
+"version"	"v1.0.1"

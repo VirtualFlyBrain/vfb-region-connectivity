@@ -1,0 +1,9 @@
+?metric	?value
+"dataset"	"optic-lobe"
+"neurons"	53409
+"neurons_with_total_upstream"	53408
+"source"	"optic-lobe:v1.0.1"
+"total_Tbars"	8348058
+"total_downstream"	57825221
+"total_upstream"	30100359
+"version"	"v1.0.1"

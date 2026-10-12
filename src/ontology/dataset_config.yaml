@@ -9,20 +9,21 @@
 #   endpoint    : "kb" (default) or "pdb" — where to query VFB. kb is the source
 #                 graph (holds datasets before they reach pdb).
 #   source      : "neuprint" (default) — pull counts from neuprint-python; or
-#                 "flywire" — read counts from a flywire codex CSV (csv_url);
-#                 "banc" / "catmaid" — totals only (see totals_only).
+#                 "flywire" — read counts from the FlyWire per-neuron neuropil
+#                 count feathers (counts_post_url / counts_pre_url);
+#                 "banc" — read counts from its per-neuropil parquet
+#                 (counts_parquet_url); "catmaid" — totals only (see totals_only).
 #   totals_only : true -> produce only synapse_totals_<key>.owl (no region file,
 #                 so roi_dataset is not needed). For datasets whose region counts
 #                 are not loaded yet.
-#   totals_parquet_url : (source: banc) URL/path of the per-neuropil connection
+#   counts_parquet_url : (source: banc) URL/path of the per-neuropil connection
 #                 counts parquet (v1 synapse set, no count threshold).
-#   csv_url     : (source: flywire) URL/path of the neuropil_synapse_table CSV.
-#   totals_post_url / totals_pre_url : (source: flywire) URL/path of the
+#   counts_post_url / counts_pre_url : (source: flywire) URL/path of the
 #                 per-neuron neuropil synapse count feathers (input / output),
-#                 summed per neuron for the whole-neuron synapse totals. These
-#                 count synapses with unproofread partners too, unlike codex's
-#                 tables (and neuropil_synapse_table only counts connections of
-#                 >= 5 synapses).
+#                 for both the region counts and the whole-neuron totals. These
+#                 count every synapse, unproofread partners included, with no
+#                 connection-count threshold (codex's neuropil_synapse_table only
+#                 counts connections of >= 5 synapses).
 
 hemibrain:
   site: neuprint_JRC_Hemibrain_1point2point1
@@ -44,28 +45,29 @@ optic-lobe:
   site: neuprint_JRC_OpticLobe_v1_0_1
   roi_dataset: Nern2024roi
 
-# flywire (FAFB): not in neuprint. Counts come from the codex per-neuron neuropil
-# synapse table (input/output synapses per region); no T-bars, so the presynaptic
-# edge carries `downstream`. Release 783 (matches the flywire783 Site).
+# flywire (FAFB): not in neuprint. Counts come from the FlyWire 783 per-neuron
+# neuropil synapse counts (Zenodo 10676866; input/output synapses per region, any
+# partner, no connection threshold); no T-bars, so the presynaptic edge carries
+# `downstream`. Release 783 (matches the flywire783 Site).
 flywire:
   site: flywire783
   roi_dataset: Dorkenwald2023roi
   source: flywire
-  csv_url: https://storage.googleapis.com/flywire-data/codex/data/fafb/783/neuropil_synapse_table.csv.gz
-  totals_post_url: https://zenodo.org/records/10676866/files/per_neuron_neuropil_count_post_783.feather
-  totals_pre_url: https://zenodo.org/records/10676866/files/per_neuron_neuropil_count_pre_783.feather
+  counts_post_url: https://zenodo.org/records/10676866/files/per_neuron_neuropil_count_post_783.feather
+  counts_pre_url: https://zenodo.org/records/10676866/files/per_neuron_neuropil_count_pre_783.feather
 
-# --- totals only (synapse_totals_<key>.owl; no region file yet) ---------------
-
-# banc: v888 (Site BANC888, DataSet Bates2026). Region individuals exist
-# (Bates2026roi) and the parquet has per-neuropil counts, but its neuropil names
-# (e.g. CB_SLP_R) don't match the region labels yet, so region counts are left
-# for later. The parquet is the v1 synapse set, as VFB's BANC connectivity is.
+# banc: v888 (Site BANC888, DataSet Bates2026). Counts come from the v1
+# per-neuropil connection counts parquet: the v1 synapse set, as VFB's BANC
+# connectivity is, with no connection-count threshold. Its neuropil labels
+# (e.g. CB_SLP_R, VNC_T1-ProNm_L) are BANC's renamings of the Ito/Court meshes
+# that Bates2026roi was curated from; banc_roi_name maps them back.
 banc:
   site: BANC888
+  roi_dataset: Bates2026roi
   source: banc
-  totals_only: true
-  totals_parquet_url: https://storage.googleapis.com/lee-lab_brain-and-nerve-cord-fly-connectome/neuron_connectivity/v888/synapses_v1_human_readable_sizethresh3_connectioncountsperneuropil.parquet
+  counts_parquet_url: https://storage.googleapis.com/lee-lab_brain-and-nerve-cord-fly-connectome/neuron_connectivity/v888/synapses_v1_human_readable_sizethresh3_connectioncountsperneuropil.parquet
+
+# --- totals only (synapse_totals_<key>.owl; no region file) ------------------
 
 # catmaid: the VFB-hosted CATMAID servers (server + project from the Site's
 # link_base). A live server has no version; the build date is recorded instead.

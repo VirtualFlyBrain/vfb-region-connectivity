@@ -3,10 +3,12 @@
 :+1: Thanks for taking the time to contribute!
 
 This repository is **not a hand-edited ontology** — it is a data pipeline that
-pulls per-neuropil synapse counts from [neuprint](https://neuprint.janelia.org)
-and generates one side-load OWL file per connectomics dataset. There is no
-`-edit` file to edit: the OWL is regenerated from the data. Please read the
-[README](README.md) first.
+pulls synapse counts from each connectome's source
+([neuprint](https://neuprint.janelia.org), the FlyWire release files on Zenodo,
+BANC's public bucket, and VFB's CATMAID servers) and generates, per dataset, a
+region-connectivity side-load OWL file and a whole-neuron synapse totals OWL
+file. There is no `-edit` file to edit: the OWL is regenerated from the data.
+Please read the [README](README.md) first.
 
 ## Reporting a problem
 
@@ -17,8 +19,9 @@ The most useful reports for this repo are:
   `src/ontology/reports/<dataset>/roi_mapping.tsv` that should map to a VFB region
   individual or an FBbt class (or one mapped to the wrong target).
 - **Wrong or unexpected counts** — a neuron's `upstream` / `Tbars` / `downstream`
-  in a region that looks incorrect. Note that counts are regenerated live from
-  neuprint and drift slightly from older pdb values within the same dataset
+  in a region, or its `total_upstream` / `total_downstream` / `total_Tbars`,
+  that looks incorrect. Note that neuprint and CATMAID counts are regenerated
+  live and can drift slightly from older pdb values within the same dataset
   version; that drift is expected, gross discrepancies are not.
 - **A new dataset** to add.
 
@@ -41,8 +44,11 @@ Workflow:
    ```bash
    pip install -r src/scripts/requirements.txt pytest && pytest src/scripts
    ```
-3. If it affects output, regenerate the affected dataset (`sh run.sh make refresh`)
-   and commit the updated `region_connectivity_<dataset>.owl.gz` and the
-   `src/ontology/reports/<dataset>/` reports.
-4. Open a pull request. CI ([`qc.yml`](.github/workflows/qc.yml)) runs the tests
-   and validates the committed artifacts — it must pass.
+3. If it affects output, regenerate the affected dataset (`sh run.sh make refresh`,
+   or delete its `.owl` files and `sh run.sh make`), refresh the reports
+   (`sh run.sh make region_connectivity_reports`), and commit the updated
+   `region_connectivity_<dataset>.owl.gz`, `synapse_totals_<dataset>.owl.gz` and
+   `src/ontology/reports/` files.
+4. Open a pull request. CI ([`qc.yml`](.github/workflows/qc.yml)) runs the test
+   suite — it must pass. It does not rebuild or check the committed artifacts,
+   so check the build's shape-check output and the report diffs yourself.

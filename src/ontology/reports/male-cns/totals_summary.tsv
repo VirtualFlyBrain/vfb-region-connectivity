@@ -1,0 +1,9 @@
+?metric	?value
+"dataset"	"male-cns"
+"neurons"	166577
+"neurons_with_total_upstream"	166530
+"source"	"male-cns:v1.0"
+"total_Tbars"	42728347
+"total_downstream"	295069139
+"total_upstream"	130453989
+"version"	"v1.0"

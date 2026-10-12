@@ -1,0 +1,9 @@
+?metric	?value
+"dataset"	"hemibrain"
+"neurons"	22704
+"neurons_with_total_upstream"	22704
+"source"	"hemibrain:v1.2.1"
+"total_Tbars"	5829713
+"total_downstream"	39611908
+"total_upstream"	18570645
+"version"	"v1.2.1"
