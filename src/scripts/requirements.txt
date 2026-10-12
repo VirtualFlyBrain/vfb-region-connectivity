@@ -2,3 +2,6 @@ neuprint-python
 requests
 pandas
 pyyaml
+pyarrow
+fsspec
+aiohttp

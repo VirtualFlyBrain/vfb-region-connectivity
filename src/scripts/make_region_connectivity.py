@@ -17,15 +17,32 @@ edge properties (side-load into pdb via vfb-pipeline-dumps).
 Each edge is an ObjectPropertyAssertion to a VFB region *individual*; the
 individual is side-specific, so laterality is carried by the target.
 
+A second file, synapse_totals_<dataset>.owl, carries each neuron's whole-neuron
+synapse totals (total_upstream / total_downstream / total_Tbars) as annotation
+assertions on the neuron, which owl2neo4jcsv turns into node properties. These
+are the denominators for input-proportion connectivity weights. They cannot be
+summed from the region edges (unmapped ROIs are dropped, neuprint ROIs overlap,
+and flywire's region table is thresholded), and they cannot ride in the region
+file, which is side-loaded edge-only.
+
+Datasets marked `totals_only` in dataset_config.yaml (BANC, CATMAID) produce only
+the totals file: banc from its per-neuropil connection counts parquet, catmaid
+from each skeleton's connectors on the VFB-hosted CATMAID server.
+
 Usage:
     python3 make_region_connectivity.py <dataset_key> <neuprint_token_file> <out_dir> <report_dir>
 """
+import datetime
 import os
 import re
 import sys
-from urllib.parse import unquote
+from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import parse_qs, unquote, urlsplit
 
+import fsspec
 import pandas as pd
+import pyarrow.parquet as pq
+import requests
 import yaml
 import neuprint
 from neuprint import NeuronCriteria as NC, fetch_neurons
@@ -80,6 +97,47 @@ _LOCAL_ORDER = {"upstream": 0, "Tbars": 1, "downstream": 2}
 # back to integer for readability.
 COUNT_DATATYPE = "http://www.w3.org/2001/XMLSchema#float"
 
+# --- Whole-neuron synapse totals ---------------------------------------------
+# source column -> node property local name (custom: namespace), per source.
+#  * neuprint: the :Neuron node's own totals, which count every synapse on the
+#    body whatever the partner (fragments included) and whatever the ROI.
+#  * flywire: summed over neuropils from the FlyWire 783 per-neuron neuropil
+#    synapse counts (Zenodo 10676866), which count every synapse on the neuron
+#    whatever the partner, unproofread fragments included (cleft score >= 50).
+TOTAL_SPECS = {
+    "neuprint": (("upstream", "total_upstream"),
+                 ("downstream", "total_downstream"),
+                 ("pre", "total_Tbars")),
+    "flywire": (("upstream", "total_upstream"),
+                ("downstream", "total_downstream")),
+    "banc": (("upstream", "total_upstream"),
+             ("downstream", "total_downstream")),
+    # catmaid: input sites, and the connectors the skeleton is presynaptic at
+    # (CATMAID's T-bar equivalent); synapses made would need every connector's
+    # partners fetched, so there is no total_downstream.
+    "catmaid": (("upstream", "total_upstream"),
+                ("pre", "total_Tbars")),
+}
+TOTALS_DESCRIPTION = {
+    "neuprint": "whole-neuron totals from the neuprint :Neuron node (all synapses, "
+                "any partner, any ROI)",
+    "flywire": "whole-neuron totals summed from the FlyWire 783 per-neuron neuropil "
+               "synapse counts (Zenodo 10676866; all synapses, any partner including "
+               "unproofread fragments, cleft score >= 50)",
+    "banc": "whole-neuron totals summed from the BANC v1 synapse set per-neuropil "
+            "connection counts (synapse size > 3, no connection-count threshold; all "
+            "synapses, any partner including unproofread fragments and unsegmented "
+            "partners)",
+    "catmaid": "whole-neuron totals from the skeleton's connectors on the CATMAID "
+               "server (input = postsynaptic links, Tbars = presynaptic connectors; "
+               "any partner, traced or not), as of the build date",
+}
+# Node properties take integers (cf. the scRNAseq cell_count node property);
+# only the edge annotations above are float, to match what pdb already holds.
+TOTAL_DATATYPE = "http://www.w3.org/2001/XMLSchema#integer"
+# concurrent requests to a CATMAID server (one request per skeleton)
+CATMAID_WORKERS = 8
+
 # number of axioms written to the per-file QC sample (shape-checked at build time,
 # since the full file is too large for robot verify)
 SAMPLE_AXIOMS = 5000
@@ -128,15 +186,27 @@ def get_neuprint_dataset(site, url=KB):
     raise RuntimeError(f"Could not derive neuprint dataset from Site {site}")
 
 
-def get_flywire_provenance(site, url=KB):
-    """Provenance string 'flywire:<data_version>' from the flywire Site node
-    (link_base carries data_version=<n>, e.g. 783). Used as dcterms:source and
-    for the versionInfo, mirroring the neuprint '<name>:<version>' shape."""
+def get_flywire_provenance(site, url=KB, name="flywire"):
+    """Provenance string '<name>:<data_version>' from a codex-linked Site node
+    (link_base carries data_version=<n>, e.g. flywire 783, banc 888). Used as
+    dcterms:source and for the versionInfo, mirroring the neuprint
+    '<name>:<version>' shape."""
     for text in _site_link_texts(site, url):
         m = re.search(r"data_version=(\d+)", text)
         if m:
-            return "flywire:%s" % m.group(1)
-    raise RuntimeError(f"Could not derive flywire version from Site {site}")
+            return "%s:%s" % (name, m.group(1))
+    raise RuntimeError(f"Could not derive {name} version from Site {site}")
+
+
+def get_catmaid_server(site, url=KB):
+    """(base URL, project id) of the CATMAID server a Site links to, e.g.
+    ('https://l1em.catmaid.virtualflybrain.org', 1)."""
+    for text in _site_link_texts(site, url):
+        parts = urlsplit(text)
+        pid = parse_qs(parts.query).get("pid")
+        if "catmaid" in parts.netloc and pid:
+            return "%s://%s" % (parts.scheme, parts.netloc), int(pid[0])
+    raise RuntimeError(f"Could not derive CATMAID server from Site {site}")
 
 
 def load_flywire_counts(csv_source, body_ids):
@@ -164,6 +234,87 @@ def load_flywire_counts(csv_source, body_ids):
     # keep only (neuron, region) pairs with at least one synapse in either direction
     m = m[(m["upstream"].fillna(0) > 0) | (m["downstream"].fillna(0) > 0)]
     return m[["bodyId", "roi", "upstream", "downstream"]].reset_index(drop=True)
+
+
+def load_flywire_totals(post_source, pre_source, body_ids):
+    """Whole-neuron [bodyId, upstream, downstream] totals from the FlyWire
+    per-neuron neuropil synapse counts (feather; one row per neuron x neuropil,
+    columns post_pt_root_id|pre_pt_root_id, neuropil, count).
+
+    upstream = synapses received (post file), downstream = synapses made (pre
+    file), each summed over neuropils. Every synapse is assigned to one
+    neuropil, so the sum is the neuron total. Unlike codex's tables these count
+    synapses with unproofread partners too, as neuprint's totals do."""
+    ids = {int(b) for b in body_ids}
+
+    def summed(source, id_col):
+        df = pd.read_feather(source, columns=[id_col, "count"])
+        df = df[df[id_col].isin(ids)]
+        return df.groupby(id_col)["count"].sum()
+
+    totals = pd.DataFrame({"upstream": summed(post_source, "post_pt_root_id"),
+                           "downstream": summed(pre_source, "pre_pt_root_id")})
+    totals.index.name = "bodyId"
+    return totals.reset_index()
+
+
+def load_banc_totals(source, body_ids):
+    """Whole-neuron [bodyId, upstream, downstream] totals from BANC's
+    per-neuropil connection counts parquet (pre_root_id, post_root_id, neuropil,
+    num_synapses; ~177M rows, so read one row group at a time).
+
+    This is the v1 synapse set (size > 3) with no connection-count threshold,
+    i.e. the synapses VFB's BANC connectivity is built from before its
+    count >= 3 cut. Rows whose partner is a fragment or unsegmented (root 0)
+    still count: they are synapses on the neuron."""
+    ids = pd.Series(sorted(int(b) for b in body_ids), dtype="int64")
+    ups, downs = [], []
+    with fsspec.open(source, "rb") as fh:
+        pf = pq.ParquetFile(fh)
+        for i in range(pf.num_row_groups):
+            rg = pf.read_row_group(i, columns=["pre_root_id", "post_root_id", "num_synapses"]
+                                   ).to_pandas()
+            post = rg[rg["post_root_id"].isin(ids)]
+            ups.append(post.groupby("post_root_id")["num_synapses"].sum())
+            pre = rg[rg["pre_root_id"].isin(ids)]
+            downs.append(pre.groupby("pre_root_id")["num_synapses"].sum())
+    up = pd.concat(ups).groupby(level=0).sum() if ups else pd.Series(dtype="int64")
+    down = pd.concat(downs).groupby(level=0).sum() if downs else pd.Series(dtype="int64")
+    totals = pd.DataFrame({"upstream": up, "downstream": down})
+    totals.index.name = "bodyId"
+    return totals.reset_index()
+
+
+def _catmaid_connector_counts(session, base, pid, skid):
+    """(upstream, pre) for one skeleton: its postsynaptic links and the
+    connectors it is presynaptic at. compact-detail connector rows are
+    [treenode, connector, relation, x, y, z] with relation 0 = presynaptic_to,
+    1 = postsynaptic_to."""
+    r = session.get("%s/%d/skeletons/%d/compact-detail" % (base, pid, skid),
+                    params={"with_connectors": "true"}, timeout=120)
+    r.raise_for_status()
+    rels = [c[2] for c in r.json()[1]]
+    return rels.count(1), rels.count(0)
+
+
+def load_catmaid_totals(base, pid, body_ids, workers=CATMAID_WORKERS):
+    """Whole-neuron [bodyId, upstream, pre] totals from a CATMAID server, one
+    request per skeleton. A skeleton the server cannot serve (e.g. since
+    deleted) is skipped and reported rather than failing the build."""
+    session = requests.Session()
+    skids = [int(b) for b in body_ids]
+
+    def one(skid):
+        try:
+            return (skid, *_catmaid_connector_counts(session, base, pid, skid))
+        except (requests.RequestException, ValueError, IndexError) as e:
+            print("  catmaid skeleton %d skipped: %s" % (skid, e))
+            return None
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        rows = [r for r in ex.map(one, skids) if r is not None]
+    print("catmaid skeletons counted: %d of %d" % (len(rows), len(skids)))
+    return pd.DataFrame(rows, columns=["bodyId", "upstream", "pre"])
 
 
 def get_bodyid_to_neuron(site, url=KB):
@@ -211,18 +362,33 @@ def _roi_from_label(label):
     return label.split(" on ")[0].replace("\\", "")
 
 
-def fetch_roi_counts(client, body_ids):
-    """neuprint roi_counts_df restricted to the bodyIds we have VFB IRIs for."""
-    frames = []
+NEUPRINT_TOTAL_COLS = ["bodyId", "pre", "post", "downstream", "upstream"]
+
+
+def fetch_neuprint_counts(client, body_ids):
+    """(totals, roi_counts) for the bodyIds we have VFB IRIs for.
+
+    totals is one row per neuron with the :Neuron node's whole-neuron counts;
+    roi_counts is neuprint's roi_counts_df (one row per neuron x ROI). Both come
+    from the same fetch_neurons call, so they describe the same snapshot."""
+    totals, frames = [], []
     ids = list(body_ids)
     chunk = 5000
     for i in range(0, len(ids), chunk):
-        _, roidf = fetch_neurons(NC(bodyId=ids[i : i + chunk]), client=client)
+        ndf, roidf = fetch_neurons(NC(bodyId=ids[i : i + chunk]), client=client)
+        if ndf is not None and not ndf.empty:
+            ndf = ndf[[c for c in NEUPRINT_TOTAL_COLS if c in ndf.columns]]
+            if "upstream" not in ndf.columns and "post" in ndf.columns:
+                # older neuprint datasets carry only post (PSD count)
+                ndf = ndf.assign(upstream=ndf["post"])
+            totals.append(ndf)
         if roidf is not None and not roidf.empty:
             frames.append(roidf)
-    if not frames:
-        return pd.DataFrame(columns=["bodyId", "roi", "pre", "post", "downstream", "upstream"])
-    return pd.concat(frames, ignore_index=True)
+    totals = (pd.concat(totals, ignore_index=True) if totals
+              else pd.DataFrame(columns=NEUPRINT_TOTAL_COLS))
+    counts = (pd.concat(frames, ignore_index=True) if frames
+              else pd.DataFrame(columns=["bodyId", "roi", "pre", "post", "downstream", "upstream"]))
+    return totals, counts
 
 
 def roi_groups_from_hierarchy(root):
@@ -312,11 +478,43 @@ def build_axioms(counts, bodyid2neuron, roi2region, edge_specs=EDGE_SPECS["neupr
     return axioms, used_props
 
 
-def write_ontology(path, dataset_key, source_id, axioms, used_props):
-    onto_iri = (
-        "http://virtualflybrain.org/data/VFB/OWL/region_connectivity_%s.owl"
-        % dataset_key
-    )
+def build_total_axioms(totals, bodyid2neuron, total_spec=TOTAL_SPECS["neuprint"]):
+    """One AnnotationAssertion per (neuron, total) on the neuron individual, so
+    owl2neo4jcsv makes it a node property. Zero/missing totals are omitted, as
+    are neurons with no VFB individual."""
+    axioms = []
+    # Column-wise, not iterrows(): a row holding a NaN is upcast to float64,
+    # which corrupts 18-digit flywire/banc root ids so they no longer match.
+    ids = totals["bodyId"].astype("int64").tolist()
+    cols = [(totals[c].tolist() if c in totals.columns else [None] * len(ids), local)
+            for c, local in total_spec]
+    for i, body in enumerate(ids):
+        neuron = bodyid2neuron.get(body)
+        if neuron is None:
+            continue
+        for values, local in cols:
+            v = values[i]
+            if pd.notna(v) and v > 0:
+                axioms.append('AnnotationAssertion(<%s%s> <%s> "%d"^^<%s>)'
+                              % (CUSTOM, local, neuron, int(v), TOTAL_DATATYPE))
+    return axioms
+
+
+REGION_ONTOLOGY = ("region_connectivity",
+                   "VFB region connectivity: %s",
+                   "Region (neuropil) synaptic connectivity for %s, generated from %s.")
+TOTALS_ONTOLOGY = ("synapse_totals",
+                   "VFB neuron synapse totals: %s",
+                   "Whole-neuron synapse totals for %s, generated from %s.")
+
+
+def write_ontology(path, dataset_key, source_id, axioms, used_props,
+                   kind=REGION_ONTOLOGY, extra_comment=None):
+    name, title, comment = kind
+    onto_iri = "http://virtualflybrain.org/data/VFB/OWL/%s_%s.owl" % (name, dataset_key)
+    comment = comment % (dataset_key, source_id)
+    if extra_comment:
+        comment += " Counts are " + extra_comment + "."
     # declare exactly the custom annotation properties actually used
     used_anns = set(re.findall(r"<http://n2o\.neo/custom/([A-Za-z_]+)>", "\n".join(axioms)))
     decls = [
@@ -334,9 +532,8 @@ def write_ontology(path, dataset_key, source_id, axioms, used_props):
         "Prefix(custom:=<%s>)" % CUSTOM,
         "",
         "Ontology(<%s>" % onto_iri,
-        'Annotation(rdfs:comment "Region (neuropil) synaptic connectivity for '
-        '%s, generated from %s.")' % (dataset_key, source_id),
-        'Annotation(dcterms:title "VFB region connectivity: %s")' % dataset_key,
+        'Annotation(rdfs:comment "%s")' % comment,
+        'Annotation(dcterms:title "%s")' % (title % dataset_key),
         'Annotation(dcterms:identifier "%s")' % dataset_key,
         'Annotation(dcterms:source "%s")' % source_id,
         'Annotation(owl:versionInfo "%s")' % version,
@@ -374,6 +571,28 @@ def write_roi_report(path, counts, roi2region, roi_group=None):
     return rows
 
 
+def report_totals(totals, counts, roi2region):
+    """Print how the whole-neuron input totals compare with the summed mapped
+    region input counts. The two are not expected to agree: mapped ROIs can
+    overlap (hemibrain maps super-ROIs and their parts), which inflates the
+    region sum, and flywire's region table only counts connections of >= 5
+    synapses, which deflates it. A large unexplained shift between builds is
+    the thing to look for."""
+    if totals.empty:
+        print("WARNING: no whole-neuron totals fetched")
+        return
+    region_up = (counts[counts["roi"].isin(roi2region)]
+                 .groupby("bodyId")["upstream"].sum())
+    both = totals.set_index("bodyId")["upstream"].to_frame("total").join(
+        region_up.rename("regions"), how="inner")
+    print("neurons with totals: %d (with region counts too: %d)" % (len(totals), len(both)))
+    if len(both):
+        print("  total_upstream sum %d vs summed mapped-region upstream %d; "
+              "%d neurons have total < region sum"
+              % (both["total"].sum(), both["regions"].sum(),
+                 int((both["total"] < both["regions"]).sum())))
+
+
 def main():
     # args: <dataset> <token_file> <out_dir> <report_dir>
     dataset_key, token_file, out_dir, report_dir = sys.argv[1:5]
@@ -389,42 +608,76 @@ def main():
 
     bodyid2neuron = get_bodyid_to_neuron(cfg["site"], url)
     print("VFB neurons:", len(bodyid2neuron))
-    roi2region = get_roi_to_region(cfg["roi_dataset"], url)
-    print("regions mapped:", len(roi2region))
+    # totals-only datasets (no region counts loaded for them yet) skip the
+    # region file, its ROI mapping and its report
+    totals_only = cfg.get("totals_only", False)
+    roi2region = {} if totals_only else get_roi_to_region(cfg["roi_dataset"], url)
+    if not totals_only:
+        print("regions mapped:", len(roi2region))
 
+    counts = None
     if source == "neuprint":
         source_id = get_neuprint_dataset(cfg["site"], url)
         print("neuprint dataset:", source_id)
         token = open(os.path.expanduser(token_file)).read().strip()
         client = neuprint.Client("https://neuprint.janelia.org", dataset=source_id, token=token)
         roi_group = get_roi_groups(client)
-        counts = fetch_roi_counts(client, bodyid2neuron.keys())
+        totals, counts = fetch_neuprint_counts(client, bodyid2neuron.keys())
     elif source == "flywire":
         source_id = get_flywire_provenance(cfg["site"], url)
         print("flywire source:", source_id)
         counts = load_flywire_counts(cfg["csv_url"], bodyid2neuron.keys())
+        totals = load_flywire_totals(cfg["totals_post_url"], cfg["totals_pre_url"],
+                                     bodyid2neuron.keys())
         roi_group = {r: "brain" for r in roi2region}  # FAFB is brain-only (no VNC)
+    elif source == "banc" and totals_only:
+        source_id = get_flywire_provenance(cfg["site"], url, name="banc")
+        print("banc source:", source_id)
+        totals = load_banc_totals(cfg["totals_parquet_url"], bodyid2neuron.keys())
+    elif source == "catmaid" and totals_only:
+        base, pid = get_catmaid_server(cfg["site"], url)
+        # a live server has no version: the build date stands in for one
+        source_id = "%s:%s" % (cfg["site"], datetime.date.today().isoformat())
+        print("catmaid source:", base, "pid", pid, "->", source_id)
+        totals = load_catmaid_totals(base, pid, bodyid2neuron.keys())
     else:
-        sys.exit("unknown source %r for dataset %s" % (source, dataset_key))
-    print("region-count rows:", len(counts))
-
-    os.makedirs(report_dir, exist_ok=True)
-    # roi_group only annotates the report's `group` column (brain/vnc); one file
-    # per dataset (a whole-CNS dataset stays well under GitHub's size limit).
-    write_roi_report(os.path.join(report_dir, "roi_mapping.tsv"), counts, roi2region, roi_group)
-
-    axioms, used_props = build_axioms(counts, bodyid2neuron, roi2region, EDGE_SPECS[source])
-    print("axioms:", len(axioms))
+        sys.exit("unsupported source %r for dataset %s (banc/catmaid need totals_only)"
+                 % (source, dataset_key))
 
     qc_dir = os.path.join(out_dir, "qc")
     os.makedirs(qc_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, "region_connectivity_%s.ofn" % dataset_key)
-    write_ontology(out_path, dataset_key, source_id, axioms, used_props)
-    # small sample for build-time QC (full file is too large for robot verify)
-    write_ontology(os.path.join(qc_dir, "region_connectivity_%s.ofn" % dataset_key),
-                   dataset_key, source_id, axioms[:SAMPLE_AXIOMS], used_props)
-    print("wrote", out_path)
+    if not totals_only:
+        print("region-count rows:", len(counts))
+        os.makedirs(report_dir, exist_ok=True)
+        # roi_group only annotates the report's `group` column (brain/vnc); one file
+        # per dataset (a whole-CNS dataset stays well under GitHub's size limit).
+        write_roi_report(os.path.join(report_dir, "roi_mapping.tsv"), counts, roi2region, roi_group)
 
+        axioms, used_props = build_axioms(counts, bodyid2neuron, roi2region, EDGE_SPECS[source])
+        print("axioms:", len(axioms))
+
+        out_path = os.path.join(out_dir, "region_connectivity_%s.ofn" % dataset_key)
+        write_ontology(out_path, dataset_key, source_id, axioms, used_props)
+        # small sample for build-time QC (full file is too large for robot verify)
+        write_ontology(os.path.join(qc_dir, "region_connectivity_%s.ofn" % dataset_key),
+                       dataset_key, source_id, axioms[:SAMPLE_AXIOMS], used_props)
+        print("wrote", out_path)
+
+    # Whole-neuron totals: a separate file because it is loaded into the main
+    # graph (node properties), whereas the region file is side-loaded edge-only.
+    total_axioms = build_total_axioms(totals, bodyid2neuron, TOTAL_SPECS[source])
+    if counts is not None:
+        report_totals(totals, counts, roi2region)
+    else:
+        print("neurons with totals: %d" % len(totals))
+    totals_path = os.path.join(out_dir, "synapse_totals_%s.ofn" % dataset_key)
+    for path, axs in ((totals_path, total_axioms),
+                      (os.path.join(qc_dir, "synapse_totals_%s.ofn" % dataset_key),
+                       total_axioms[:SAMPLE_AXIOMS])):
+        write_ontology(path, dataset_key, source_id, axs, set(),
+                       kind=TOTALS_ONTOLOGY, extra_comment=TOTALS_DESCRIPTION[source])
+    print("total axioms:", len(total_axioms))
+    print("wrote", totals_path)
 
 if __name__ == "__main__":
     main()
