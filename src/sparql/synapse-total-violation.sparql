@@ -1,0 +1,15 @@
+# VIOLATION: a whole-neuron synapse total that is not a positive count on a VFB
+# neuron individual. synapse_totals_<dataset>.owl should hold nothing but
+# custom:total_* annotation assertions with a VFB neuron as subject.
+PREFIX custom: <http://n2o.neo/custom/>
+
+SELECT DISTINCT ?neuron ?prop ?value
+WHERE {
+  ?neuron ?prop ?value .
+  FILTER(STRSTARTS(str(?prop), "http://n2o.neo/custom/"))
+  FILTER(
+    ?prop NOT IN (custom:total_upstream, custom:total_downstream, custom:total_Tbars)
+    || !STRSTARTS(str(?neuron), "http://virtualflybrain.org/reports/VFB_")
+    || ?value <= 0
+  )
+}

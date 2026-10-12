@@ -17,6 +17,15 @@ optic-lobe) or a [flywire codex](https://codex.flywire.ai) CSV (flywire/FAFB).
 Even a whole-CNS dataset compresses to a few tens of MB as a single file, so no
 splitting is needed.
 
+The same pull also produces one **whole-neuron synapse totals** file per dataset:
+
+```
+synapse_totals_<dataset>.owl
+```
+
+holding each neuron's total input and output synapse counts (see
+[Whole-neuron synapse totals](#whole-neuron-synapse-totals)).
+
 ## Representation
 
 For each neuron × region, the counts are attached as **axiom annotations** in the
@@ -67,6 +76,71 @@ ObjectPropertyAssertion(
     Annotation(custom:downstream "1665"^^xsd:float)
     obo:RO_0002113 VFB:VFB_jrchjz57 VFB:VFB_00101436)
 ```
+
+## Whole-neuron synapse totals
+
+`synapse_totals_<dataset>.owl` gives each VFB neuron its total synapse counts as
+annotation assertions in the `custom:` namespace, which `owl2neo4jcsv` turns into
+**node properties** (the same mechanism as the scRNAseq `cell_count`):
+
+| Node property | Meaning | neuprint | flywire | banc | catmaid |
+|---|---|---|---|---|---|
+| `total_upstream` | input synapses | `:Neuron.upstream` (`post` if absent) | `per_neuron_neuropil_count_post_783`, summed | parquet rows where the neuron is post, summed | postsynaptic links |
+| `total_downstream` | output synapses | `:Neuron.downstream` | `per_neuron_neuropil_count_pre_783`, summed | parquet rows where the neuron is pre, summed | — |
+| `total_Tbars` | presynaptic sites | `:Neuron.pre` | — (no T-bars) | — | presynaptic connectors |
+
+BANC and CATMAID are **totals-only** datasets (`totals_only: true`): they get a
+`synapse_totals_<dataset>.owl` but no region file yet. BANC (v888, Site
+`BANC888`) has region individuals (`Bates2026roi`) and per-neuropil counts, but
+the parquet's neuropil names (`CB_SLP_R`, …) don't match the region labels yet.
+
+* **banc** — `totals_parquet_url`: the v888
+  `synapses_v1_human_readable_sizethresh3_connectioncountsperneuropil.parquet`,
+  i.e. the v1 synapse set (size > 3) with no connection-count threshold — the
+  same synapses VFB's BANC connectivity uses before its count >= 3 cut. Partners
+  that are fragments or unsegmented (root 0) still count. (`banc_888_metrics`
+  also has per-neuron totals, but from the v2 synapse set, so they wouldn't match
+  the edges.)
+* **catmaid** — the VFB-hosted CATMAID server and project are read from the
+  Site's `link_base`; each skeleton's `compact-detail` connectors give its input
+  links and presynaptic connectors, traced partner or not (one request per
+  skeleton, 8 at a time). Synapses *made* would need every connector's partners,
+  so there is no `total_downstream`. A live server has no version, so the build
+  date is recorded as `dcterms:source` `<site>:<date>`.
+
+```
+AnnotationAssertion(custom:total_upstream VFB:VFB_jrchjz57 "1531"^^xsd:integer)   # illustrative value
+```
+
+These are the denominators for input-proportion connectivity weights (the share
+of a neuron's input that comes from a given partner), planned for the VFB circuit
+browser and class-level connectivity. They **cannot** be derived from the region edges or from VFB's
+`synapsed_to` edges:
+
+* mapped neuprint ROIs can overlap (hemibrain maps super-ROIs as well as their
+  parts, e.g. `CRE(R)` and `CRE(-ROB,-RUB)(R)`), and unmapped ones are dropped,
+  so region counts don't sum to a neuron total;
+* flywire's `neuropil_synapse_table` only counts connections of **>= 5
+  synapses**, so its region counts are thresholded;
+* VFB's `synapsed_to` edges only connect neurons VFB has loaded and drop
+  connections of 1 (or, for BANC, 2) synapses.
+
+Every source counts **every synapse on the neuron, whatever the partner**,
+unproofread fragments included. flywire's come from the FlyWire 783
+per-neuron neuropil synapse counts on
+[Zenodo 10676866](https://zenodo.org/records/10676866) (`totals_post_url` /
+`totals_pre_url` in `dataset_config.yaml`; cleft score >= 50, the same synapse
+set as VFB's flywire connectivity), not from codex, whose tables only cover
+connections between proofread neurons. Each file's `rdfs:comment` records its
+source. During the build, `report_totals` prints
+how the totals compare with the mapped region input counts.
+
+**Loading:** unlike the region files, these go into the main graph, not the
+edge-only side-load. `vfb-pipeline-dumps` converts side-loads with
+`owl2neo4jcsv … only_edges`, which would drop node properties. So they need
+listing in `vfb-pipeline-collectdata`'s `vfb_fullontologies.txt` (e.g.
+`http://virtualflybrain.org/data/VFB/OWL/synapse_totals_*`), like the scRNAseq
+metadata files, and must **not** match `PDB_EXTERNAL_ONTS`.
 
 ## Data source
 
@@ -209,12 +283,15 @@ single source of truth, read by both the generator and the Makefile:
   # endpoint: pdb                        # optional; defaults to kb
   # source: flywire                      # optional; defaults to neuprint
   # csv_url: https://…/table.csv.gz      # required when source: flywire
+  # totals_only: true                    # totals file only (no roi_dataset needed)
 ```
 
 The top-level key is the `<dataset>` build arg and the output-file suffix. No
 code or Makefile change is needed — `make region_connectivity` picks it up. A
 neuprint dataset needs only `site` + `roi_dataset`; a flywire dataset also needs
-`source: flywire` and the `csv_url` of its `neuropil_synapse_table` CSV.
+`source: flywire` and the `csv_url` of its `neuropil_synapse_table` CSV (plus
+`totals_post_url` / `totals_pre_url`). A `totals_only` dataset (source `banc` or
+`catmaid`) needs no `roi_dataset`; the Makefile builds it with its own rule.
 
 The region individuals must exist in VFB first (loaded from the connectome's
 painted-domain ROIs). ROIs with no individual are dropped and flagged in
@@ -234,6 +311,7 @@ include `region_connectivity_*.owl`.
 | Path | What it is |
 |---|---|
 | `region_connectivity_<dataset>.owl.gz` | The committed side-load artifact(s) (repo root). The uncompressed `.owl` is git-ignored. |
+| `synapse_totals_<dataset>.owl.gz` | Whole-neuron synapse totals (node properties), loaded into the main graph. The uncompressed `.owl` is git-ignored. |
 | `src/scripts/make_region_connectivity.py` | The generator: neuprint pull → mappings → OWL + ROI report. |
 | `src/scripts/cypher_query.py` | Helper for querying VFB's Neo4j (`kb`/`pdb`). |
 | `src/scripts/requirements.txt` | Python dependencies. |
@@ -244,7 +322,7 @@ include `region_connectivity_*.owl`.
 | `src/ontology/Makefile`, `run.sh` | ODK-managed wrappers (do not edit). |
 | `src/ontology/reports/` | Generated reports — per-dataset in `<dataset>/`, merged term list at the root. |
 | `src/sparql/region_connectivity_*.sparql` | Term-list and summary report queries. |
-| `src/sparql/*-violation.sparql` | Shape-validation checks that lock the output to the emitted individual form. |
+| `src/sparql/*-violation.sparql` | Shape-validation checks that lock the output to the emitted individual form (`synapse-total-violation.sparql` for the totals files). |
 | `.github/workflows/qc.yml` | CI: tests + committed-artifact validation. |
 
 ## Acknowledgements

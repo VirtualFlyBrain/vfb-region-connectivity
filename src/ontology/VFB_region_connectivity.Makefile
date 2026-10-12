@@ -11,6 +11,11 @@
 ## side-loaded by vfb-pipeline-dumps (edge-only) and never merged/reasoned, so
 ## keeping one file per dataset bounds the size of any single artifact.
 ##
+## The same pull also writes synapse_totals_<dataset>.owl: each neuron's
+## whole-neuron synapse totals as node annotations. Those must reach pdb as node
+## properties, which an edge-only side-load drops, so that file is loaded into
+## the main graph instead (vfb-pipeline-collectdata vfb_fullontologies.txt).
+##
 ## Build everything:   sh run.sh make region_connectivity
 ## Build one dataset:  sh run.sh make ../../region_connectivity_hemibrain.owl
 
@@ -24,9 +29,14 @@ NEUPRINT_TOKEN_FILE = ../../neuprint_token.txt
 # make_region_connectivity.py); DATASETS is its list of top-level keys.
 DATASET_CONFIG = dataset_config.yaml
 DATASETS := $(shell grep -E '^[A-Za-z0-9._-]+:' $(DATASET_CONFIG) | sed 's/:.*//')
+# datasets with `totals_only: true` produce only synapse_totals_<dataset>.owl
+TOTALS_ONLY_DATASETS := $(shell awk '/^[A-Za-z0-9._-]+:/{k=$$1; sub(":$$","",k)} /^  totals_only: *true/{print k}' $(DATASET_CONFIG))
+REGION_DATASETS := $(filter-out $(TOTALS_ONLY_DATASETS),$(DATASETS))
 
 RELEASEDIR = ../..
-REGION_FILES = $(patsubst %, $(RELEASEDIR)/region_connectivity_%.owl, $(DATASETS))
+REGION_FILES = $(patsubst %, $(RELEASEDIR)/region_connectivity_%.owl, $(REGION_DATASETS))
+TOTALS_FILES = $(patsubst %, $(RELEASEDIR)/synapse_totals_%.owl, $(DATASETS))
+TOTALS_ONLY_FILES = $(patsubst %, $(RELEASEDIR)/synapse_totals_%.owl, $(TOTALS_ONLY_DATASETS))
 # shape checks run on a small QC sample of each generated file (build-time)
 RC_QUERIES = $(foreach V,post-edge-missing-upstream pre-edge-missing-count \
 	nonpositive-count unexpected-connectivity-relation unexpected-count-annotation \
@@ -51,25 +61,38 @@ get_query_script:
 ######################### Build #########################
 
 .PHONY: region_connectivity
-region_connectivity: $(REGION_FILES)
+region_connectivity: $(REGION_FILES) $(TOTALS_FILES)
 
 # Force a fresh pull from neuprint (data is only rebuilt on demand / when absent).
 .PHONY: refresh
 refresh:
 	rm -f $(REGION_FILES) $(RELEASEDIR)/region_connectivity_*.owl.gz
+	rm -f $(TOTALS_FILES) $(RELEASEDIR)/synapse_totals_*.owl.gz
 	$(MAKE) region_connectivity
 
 # Build one dataset: pull from neuprint, emit functional-syntax OWL (one file per
 # dataset) plus a small QC sample, convert to RDF/XML + gzip, and run the shape
 # checks on the QC sample (the full file is too large for robot verify). The plain
 # .owl is the side-load; the .owl.gz is committed. Rebuilt only when the .owl is
-# missing (delete it, or `make refresh`, to re-pull).
-$(RELEASEDIR)/region_connectivity_%.owl: | my-venv/.installed $(TMPDIR)
+# missing (delete it, or `make refresh`, to re-pull). Both files of a dataset
+# come from one pull: a multi-target pattern rule runs the recipe once for both.
+$(RELEASEDIR)/region_connectivity_%.owl $(RELEASEDIR)/synapse_totals_%.owl: | my-venv/.installed $(TMPDIR)
 	my-venv/bin/python3 $(SCRIPTSDIR)/make_region_connectivity.py $* $(NEUPRINT_TOKEN_FILE) $(TMPDIR) $(REPORTDIR)/$*
-	$(ROBOT) convert -i $(TMPDIR)/region_connectivity_$*.ofn -f owl -o $@
-	gzip -kf $@
+	$(ROBOT) convert -i $(TMPDIR)/region_connectivity_$*.ofn -f owl -o $(RELEASEDIR)/region_connectivity_$*.owl
+	$(ROBOT) convert -i $(TMPDIR)/synapse_totals_$*.ofn -f owl -o $(RELEASEDIR)/synapse_totals_$*.owl
+	gzip -kf $(RELEASEDIR)/region_connectivity_$*.owl $(RELEASEDIR)/synapse_totals_$*.owl
 	$(ROBOT) verify -i $(TMPDIR)/qc/region_connectivity_$*.ofn --queries $(RC_QUERIES) -O $(TMPDIR)/qc
-	@echo "\nBuilt $@ (+ $@.gz), QC passed\n"
+	$(ROBOT) verify -i $(TMPDIR)/qc/synapse_totals_$*.ofn --queries $(SPARQLDIR)/synapse-total-violation.sparql -O $(TMPDIR)/qc
+	@echo "\nBuilt region_connectivity_$*.owl + synapse_totals_$*.owl (+ .gz), QC passed\n"
+
+# Totals-only datasets (no region file). A static pattern rule, so it takes
+# precedence over the two-target pattern rule above for these files.
+$(TOTALS_ONLY_FILES): $(RELEASEDIR)/synapse_totals_%.owl: | my-venv/.installed $(TMPDIR)
+	my-venv/bin/python3 $(SCRIPTSDIR)/make_region_connectivity.py $* $(NEUPRINT_TOKEN_FILE) $(TMPDIR) $(REPORTDIR)/$*
+	$(ROBOT) convert -i $(TMPDIR)/synapse_totals_$*.ofn -f owl -o $@
+	gzip -kf $@
+	$(ROBOT) verify -i $(TMPDIR)/qc/synapse_totals_$*.ofn --queries $(SPARQLDIR)/synapse-total-violation.sparql -O $(TMPDIR)/qc
+	@echo "\nBuilt $@ (+ .gz), QC passed\n"
 
 ######################### Reports #########################
 ## sh run.sh make region_connectivity_reports
@@ -79,8 +102,8 @@ $(RELEASEDIR)/region_connectivity_%.owl: | my-venv/.installed $(TMPDIR)
 
 # Reports load the full OWL, so they are heavy for large datasets; run after a
 # build. reports/<dataset>/{terms.txt,summary.tsv}; merged term list at root.
-DATASET_TERMS = $(patsubst %, $(REPORTDIR)/%/terms.txt, $(DATASETS))
-DATASET_SUMMARIES = $(patsubst %, $(REPORTDIR)/%/summary.tsv, $(DATASETS))
+DATASET_TERMS = $(patsubst %, $(REPORTDIR)/%/terms.txt, $(REGION_DATASETS))
+DATASET_SUMMARIES = $(patsubst %, $(REPORTDIR)/%/summary.tsv, $(REGION_DATASETS))
 
 $(REPORTDIR)/%/terms.txt: $(RELEASEDIR)/region_connectivity_%.owl | $(REPORTDIR)
 	mkdir -p $(REPORTDIR)/$*
@@ -107,7 +130,7 @@ region_connectivity_reports: $(DATASET_TERMS) $(REPORTDIR)/region_connectivity-t
 
 # --- optional standard ROBOT report (missing_label rows filtered out: side-load
 #     edge files intentionally carry no labels for external terms).
-DATASET_OBO_REPORTS = $(patsubst %, $(REPORTDIR)/%/obo-report.tsv, $(DATASETS))
+DATASET_OBO_REPORTS = $(patsubst %, $(REPORTDIR)/%/obo-report.tsv, $(REGION_DATASETS))
 
 $(REPORTDIR)/%/obo-report.tsv: $(RELEASEDIR)/region_connectivity_%.owl | $(REPORTDIR)
 	mkdir -p $(REPORTDIR)/$*

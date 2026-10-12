@@ -84,6 +84,8 @@ src/scripts/__pycache__/
 # large plain side-load artifacts (commit the .gz instead; >100MB blocked by GitHub)
 region_connectivity_*.owl
 !region_connectivity_*.owl.gz
+synapse_totals_*.owl
+!synapse_totals_*.owl.gz
 
 # unused ODK seed artifacts: this repo has no hand-edited ontology or minted IDs
 src/ontology/VFB_region_connectivity-edit.owl
