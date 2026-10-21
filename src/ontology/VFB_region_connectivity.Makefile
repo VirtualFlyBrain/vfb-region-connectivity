@@ -84,7 +84,7 @@ $(RELEASEDIR)/region_connectivity_%.owl $(RELEASEDIR)/synapse_totals_%.owl: | my
 	my-venv/bin/python3 $(SCRIPTSDIR)/make_region_connectivity.py $* $(NEUPRINT_TOKEN_FILE) $(TMPDIR) $(REPORTDIR)/$*
 	$(ROBOT) convert -i $(TMPDIR)/region_connectivity_$*.ofn -f owl -o $(RELEASEDIR)/region_connectivity_$*.owl
 	$(ROBOT) convert -i $(TMPDIR)/synapse_totals_$*.ofn -f owl -o $(RELEASEDIR)/synapse_totals_$*.owl
-	gzip -kf $(RELEASEDIR)/region_connectivity_$*.owl $(RELEASEDIR)/synapse_totals_$*.owl
+	gzip -9kf $(RELEASEDIR)/region_connectivity_$*.owl $(RELEASEDIR)/synapse_totals_$*.owl
 	$(ROBOT) verify -i $(TMPDIR)/qc/region_connectivity_$*.ofn --queries $(RC_QUERIES) -O $(TMPDIR)/qc
 	$(ROBOT) verify -i $(TMPDIR)/qc/synapse_totals_$*.ofn --queries $(SPARQLDIR)/synapse-total-violation.sparql -O $(TMPDIR)/qc
 	@echo "\nBuilt region_connectivity_$*.owl + synapse_totals_$*.owl (+ .gz), QC passed\n"
@@ -94,7 +94,7 @@ $(RELEASEDIR)/region_connectivity_%.owl $(RELEASEDIR)/synapse_totals_%.owl: | my
 $(TOTALS_ONLY_FILES): $(RELEASEDIR)/synapse_totals_%.owl: | my-venv/.installed $(TMPDIR)
 	my-venv/bin/python3 $(SCRIPTSDIR)/make_region_connectivity.py $* $(NEUPRINT_TOKEN_FILE) $(TMPDIR) $(REPORTDIR)/$*
 	$(ROBOT) convert -i $(TMPDIR)/synapse_totals_$*.ofn -f owl -o $@
-	gzip -kf $@
+	gzip -9kf $@
 	$(ROBOT) verify -i $(TMPDIR)/qc/synapse_totals_$*.ofn --queries $(SPARQLDIR)/synapse-total-violation.sparql -O $(TMPDIR)/qc
 	@echo "\nBuilt $@ (+ .gz), QC passed\n"
 
